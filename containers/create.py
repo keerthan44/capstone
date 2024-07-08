@@ -1,7 +1,8 @@
 import docker
 import os
-import tempfile
 import json
+import redis
+import time
 
 # Initialize Docker client
 client = docker.from_env()
@@ -34,19 +35,37 @@ def read_container_names(file_path):
         return [line.strip() for line in file.readlines()]
 
 # Function to create and run a container
-def create_container(container_name, network_name, data):
+def create_container(container_name, network_name, data, ip_address):
+    print(network_name)
     json_file_path = create_json_file(container_name, data)
     container = client.containers.run(
         "flask-contact-container",
         name=container_name,
+        hostname=container_name[:5],
         detach=True,
         network=network_name,
         ports={'80/tcp': None},
-        volumes={json_file_path: {'bind': '/app/calls.json', 'mode': 'ro'}}
+        environment={"CONTAINER_NAME": container_name,
+                     "REDIS_IP_ADDRESS": ip_address},
     )
+    os.system(f"docker cp ./{container_name}.json {container.id}:/app/calls.json")
     os.remove(json_file_path)
     print(f"Container '{container_name}' created and started.")
     return container
+
+def create_redis_container(network_name):
+    container = client.containers.run(
+        "redis:latest", 
+        name="redis_capstone", 
+        hostname="redis_capstone", 
+        ports={'6379/tcp': None}, 
+        detach=True,
+        network=network_name
+    )
+    print(f"Redis container started with ID: {container.id}")
+    return container
+    # ip_add = container.attrs['NetworkSettings']["Networks"][network_name]["IPAddress"]
+
 
 # Main function
 def main():
@@ -59,12 +78,28 @@ def main():
     # Read container names from file
     container_names = read_container_names(container_names_file)
 
+    #Create Redis Container
+    redis_container = create_redis_container(network_name)
+    redis_container.reload()
+    print(redis_container.attrs['NetworkSettings'])
+    ip_address = redis_container.attrs['NetworkSettings']["Networks"][network_name]["IPAddress"]
+
+    print("Redis container is up and running.")
+
     with open('calls.json') as f:
         calls = json.load(f)
     # # Create and run containers
-    containers = [create_container(name, network_name, calls[name] if name in calls else {}) for name in container_names]
+    containers = [create_container(name, network_name, calls[name] if name in calls else {}, ip_address) for name in container_names]
 
     print("All containers are up and running.")
+
+    redis_client = redis.StrictRedis(host=ip_address, port=6379)
+    redis_client.set('start_time', int(time.time()))
+
+    print("Redis Start Time value is now set at", redis_client.get('start_time'))
+    print("Containers will start communicating")
+
+
 
 if __name__ == "__main__":
     main()

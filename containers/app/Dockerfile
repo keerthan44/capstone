@@ -4,6 +4,6 @@ WORKDIR /app
 
 COPY app.py .
 
-RUN pip install Flask requests docker
+RUN pip install Flask requests docker redis
 
 CMD ["python", "app.py"]
