@@ -48,6 +48,7 @@ def upload():
     
     with open('containers/calls.json', 'w') as f:
         json.dump(result, f)
+    # containers.append(containers.pop(0))
     with open('containers/containers.txt', 'w') as f:
         f.writelines(f"{container}\n" for container in containers)
 
@@ -55,16 +56,3 @@ def upload():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-
-
-
-def process_data(file_path):
-
-    df = pd.read_csv(file_path)    
-    return result
-
-# Example usage
-file_path = '/Users/premsemitha/capstone/trace_0_data_modified_with_suffixes.csv'
-output_dict = process_data(file_path)
-print(output_dict)
