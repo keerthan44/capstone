@@ -1,5 +1,7 @@
 from flask import Flask, request, jsonify, render_template
+import json
 import pandas as pd
+import os
 
 app = Flask(__name__)
 
@@ -12,32 +14,42 @@ def upload():
     file = request.files['file']
     if not file:
         return "No file"
-    df = pd.read_csv(file)
+    def read_and_sort_csv(file_path):
+        # Read the CSV file
+        df = pd.read_csv(file_path)
 
+        # Sort the dataframe by the 'timestamp' column
+        sorted_df = df.sort_values(by='timestamp')
 
+        return sorted_df
+    df = read_and_sort_csv(file)
 
     result = {}
-
+    containers = []
 
     for index, row in df.iterrows():
         timestamp = row['timestamp']
         um = row['um']
         dm = row['dm']
 
-
         if '?' in um or '?' in dm:
             continue
-
+        if um not in containers:
+            containers.append(um)
+        if dm not in containers:
+            containers.append(dm)
 
         if timestamp not in result:
-            result[timestamp] = {}
+            result[um] = {}
 
-
-        if um not in result[timestamp]:
-            result[timestamp][um] = []
-
-
-        result[timestamp][um].append(dm)
+        if timestamp not in result[um]:
+            result[um][timestamp] = []
+        result[um][timestamp].append(dm)
+    
+    with open('containers/calls.json', 'w') as f:
+        json.dump(result, f)
+    with open('containers/containers.txt', 'w') as f:
+        f.writelines(f"{container}\n" for container in containers)
 
     return jsonify(result)
 
