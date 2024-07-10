@@ -53,6 +53,19 @@ def create_container(container_name, network_name, data, ip_address):
     print(f"Container '{container_name}' created and started.")
     return container
 
+def create_logging_container(network_name, redis_ip):
+    container = client.containers.run(
+        'logging_capstone',
+        name="logging_capstone",
+        hostname='logging_capstone',
+        detach=True,
+        network=network_name,
+        ports={'80/tcp': None},
+        environment={"REDIS_IP_ADDRESS": redis_ip}
+    )
+    print(f"Logging Container '{container.id}' created and started.")
+    return container
+
 def create_redis_container(network_name):
     container = client.containers.run(
         "redis:latest", 
@@ -83,8 +96,11 @@ def main():
     redis_container.reload()
     print(redis_container.attrs['NetworkSettings'])
     ip_address = redis_container.attrs['NetworkSettings']["Networks"][network_name]["IPAddress"]
-
     print("Redis container is up and running.")
+
+    # Create Logging Container
+    create_logging_container(network_name, ip_address)
+    print("Logging container is up and running.")
 
     with open('calls.json') as f:
         calls = json.load(f)

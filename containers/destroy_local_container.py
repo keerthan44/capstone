@@ -23,6 +23,7 @@ def main():
     with Pool(processes=len(container_names)) as pool:
         pool.map(stop_and_remove_container, container_names)
     stop_and_remove_container('redis_capstone')
+    stop_and_remove_container('logging_capstone')
 
 if __name__ == "__main__":
     main()

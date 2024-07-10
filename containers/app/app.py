@@ -66,6 +66,14 @@ def home():
     data = request.get_json()
     # log
     print(data, start_time)
+    try:
+        response = requests.post(f"http://logging_capstone/logs", 
+                                    json={"timestamp": data["timestamp"], 
+                                          "dm": container_name,
+                                          "um": data['um']
+                                          })
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to contact logging_capstone: {e}")
 
     return jsonify({"status": "success"}), 200
 

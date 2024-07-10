@@ -39,7 +39,7 @@ def upload():
         if dm not in containers:
             containers.append(dm)
 
-        if timestamp not in result:
+        if um not in result:
             result[um] = {}
 
         if timestamp not in result[um]:
@@ -55,4 +55,4 @@ def upload():
     return jsonify(result)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=3000)
