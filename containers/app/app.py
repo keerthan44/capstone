@@ -3,18 +3,36 @@ import requests
 import threading
 import time
 import json
-import docker
 import os
 import redis
+from jaeger_client import Config
+from flask_opentracing import FlaskTracing
+
+def init_jaeger_tracer(service_name='your-service-name'):
+    config = Config(
+        config={
+            'sampler': {'type': 'const', 'param': 1},
+            'logging': True,
+            'local_agent': {
+                'reporting_host': os.environ.get('JAEGER_AGENT_HOST', "localhost"),
+                'reporting_port': os.environ.get('JAEGER_AGENT_PORT', '6831'),
+            },
+        },
+        service_name=service_name,
+    )
+    return config.initialize_tracer()
+
+
 
 app = Flask(__name__)
 
-container_name = os.environ.get("CONTAINER_NAME")
-redis_ip = os.environ.get("REDIS_IP_ADDRESS")
-print(redis_ip)
-print(container_name)
+
+container_name = os.environ.get("CONTAINER_NAME", "1")
+redis_ip = os.environ.get("REDIS_IP_ADDRESS", "2")
 redis_client = redis.StrictRedis(host=redis_ip, port=6379)
 start_time = ''
+jaeger_tracer = init_jaeger_tracer(container_name[:5])
+tracing = FlaskTracing(jaeger_tracer, True, app)
 
 
 
@@ -45,11 +63,9 @@ def contact_containers(calls):
             if calls_list[0] > timestamp:
                 break
             timestamps.append(calls_list.pop(0))
-        print(timestamps)
         containers = []
         for tempTimeStamp in timestamps:
             containers.extend(calls[str(tempTimeStamp)])
-        print(containers)
         if containers:
             for container in containers:
                 try:
@@ -65,7 +81,6 @@ def contact_containers(calls):
 def home():
     data = request.get_json()
     # log
-    print(data, start_time)
     try:
         response = requests.post(f"http://logging_capstone/logs", 
                                     json={"timestamp": data["timestamp"], 
@@ -88,7 +103,6 @@ if __name__ == "__main__":
                 calls = json.load(f)
             break
         time.sleep(1)
-    print(calls)
     if calls:
         threading.Thread(target=contact_containers, args=(calls,)).start()
     app.run(host='0.0.0.0', port=80)

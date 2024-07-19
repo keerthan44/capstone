@@ -4,6 +4,6 @@ WORKDIR /app
 
 COPY app.py .
 
-RUN pip install Flask requests docker redis
+RUN pip install Flask requests docker redis jaeger-client flask-opentracing
 
 CMD ["python", "app.py"]

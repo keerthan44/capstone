@@ -1,29 +1,54 @@
-import docker
+import asyncio
+import aiodocker
+from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Pool
 
-def read_container_names(file_path):
+async def read_container_names(file_path):
     with open(file_path, 'r') as file:
         return [line.strip() for line in file.readlines()]
 
-def stop_and_remove_container(container_name):
-    try:
-        client = docker.from_env()
-        container = client.containers.get(container_name)
-        print(f"Stopping container {container.name} ({container.id})...")
-        container.stop()
-        print(f"Removing container {container.name} ({container.id})...")
-        container.remove()
-    except docker.errors.NotFound:
-        print(f"Container {container_name} does not exist")
+async def stop_and_remove_container(container_name):
+    async with aiodocker.Docker() as client:
+        try:
+            container = await client.containers.get(container_name)
+            print(f"Stopping container {container_name}...")
+            await container.stop()
+            print(f"Removing container {container_name}...")
+            await container.delete()
+        except aiodocker.exceptions.DockerError as e:
+            if e.status == 404:
+                print(f"Container {container_name} does not exist")
+            else:
+                print(f"Error with container {container_name}: {e}")
 
-def main():
-    container_names = read_container_names('containers.txt')
+async def main():
+    container_names = await read_container_names('containers.txt')
     
-    # Use Pool to manage multiple processes
+    with ThreadPoolExecutor(max_workers=len(container_names)) as executor:
+        loop = asyncio.get_running_loop()
+        
+        # Using ThreadPoolExecutor to run async operations in multiple threads
+        tasks = [loop.run_in_executor(executor, asyncio.ensure_future, stop_and_remove_container(name)) for name in container_names]
+        
+        # Adding additional containers to the tasks
+        tasks.extend([
+            loop.run_in_executor(executor, asyncio.ensure_future, stop_and_remove_container('redis_capstone')),
+            loop.run_in_executor(executor, asyncio.ensure_future, stop_and_remove_container('logging_capstone'))
+        ])
+        
+        await asyncio.gather(*tasks)
+
+def main_multiprocessing():
+    container_names = asyncio.run(read_container_names('containers.txt'))
+    
     with Pool(processes=len(container_names)) as pool:
-        pool.map(stop_and_remove_container, container_names)
-    stop_and_remove_container('redis_capstone')
-    stop_and_remove_container('logging_capstone')
+        pool.map(stop_and_remove_container_sync, container_names)
+    
+    stop_and_remove_container_sync('redis_capstone')
+    stop_and_remove_container_sync('logging_capstone')
+
+def stop_and_remove_container_sync(container_name):
+    asyncio.run(stop_and_remove_container(container_name))
 
 if __name__ == "__main__":
-    main()
+    main_multiprocessing()
