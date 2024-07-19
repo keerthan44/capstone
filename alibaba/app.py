@@ -46,10 +46,10 @@ def upload():
             result[um][timestamp] = []
         result[um][timestamp].append(dm)
     
-    with open('containers/calls.json', 'w') as f:
+    with open('../containers/calls.json', 'w') as f:
         json.dump(result, f)
     # containers.append(containers.pop(0))
-    with open('containers/containers.txt', 'w') as f:
+    with open('../containers/containers.txt', 'w') as f:
         f.writelines(f"{container}\n" for container in containers)
 
     return jsonify(result)
