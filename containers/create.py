@@ -34,6 +34,30 @@ def read_container_names(file_path):
     with open(file_path, 'r') as file:
         return [line.strip() for line in file.readlines()]
 
+def get_and_rename_containers(containersFile="containers.txt", callsFile="calls.json"):
+    mappedContainersFile = "".join(containersFile.split(".")[0]) + "_mapped.json"
+    if os.path.isfile(mappedContainersFile):
+        with open(mappedContainersFile) as f:
+            renamed_containers = json.load(f)
+        calls = {}
+        with open(callsFile) as f:
+            calls = json.load(f)
+        return renamed_containers.values(), calls
+    containers = read_container_names(containersFile)
+    renamed_containers = {container: f"s{i}" for i, container in enumerate(containers, 1)}
+    calls = {}
+    with open(callsFile) as f:
+        calls = json.load(f)
+
+    for um in list(calls.keys()): 
+        for timestamp in calls[um]:
+            for i, dm in enumerate(calls[um][timestamp]):
+                calls[um][timestamp][i] = renamed_containers[dm]
+        calls[renamed_containers[um]] = calls.pop(um)
+    with open(mappedContainersFile, "w") as f:
+        json.dump(renamed_containers, f)
+    return renamed_containers.values(), calls
+
 # Function to create and run a container
 def create_container(container_name, network_name, data, ip_address):
     print(network_name)
@@ -89,12 +113,12 @@ def main():
     network = get_or_create_network(network_name)
 
     # Read container names from file
-    container_names = read_container_names(container_names_file)
+    container_names, calls = get_and_rename_containers() 
 
     #Create Redis Container
     redis_container = create_redis_container(network_name)
     redis_container.reload()
-    print(redis_container.attrs['NetworkSettings'])
+    # print(redis_container.attrs['NetworkSettings'])
     ip_address = redis_container.attrs['NetworkSettings']["Networks"][network_name]["IPAddress"]
     print("Redis container is up and running.")
 
@@ -102,8 +126,6 @@ def main():
     create_logging_container(network_name, ip_address)
     print("Logging container is up and running.")
 
-    with open('calls.json') as f:
-        calls = json.load(f)
     # # Create and run containers
     containers = [create_container(name, network_name, calls[name] if name in calls else {}, ip_address) for name in container_names]
 

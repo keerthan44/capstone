@@ -1,5 +1,7 @@
 import docker
 from multiprocessing import Pool
+import os
+import json
 
 def read_container_names(file_path):
     with open(file_path, 'r') as file:
@@ -17,7 +19,14 @@ def stop_and_remove_container(container_name):
         print(f"Container {container_name} does not exist")
 
 def main():
-    container_names = read_container_names('containers.txt')
+    mappedContainersFile = "containers_mapped.json"
+    container_names = []
+    if os.path.isfile(mappedContainersFile):
+        with open(mappedContainersFile) as f:
+            container_names = json.load(f)
+        container_names = container_names.values() 
+    else:
+        container_names = read_container_names('containers.txt')
     
     # Use Pool to manage multiple processes
     with Pool(processes=len(container_names)) as pool:
