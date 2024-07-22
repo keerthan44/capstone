@@ -42,6 +42,13 @@ def get_and_rename_containers(containersFile="containers.txt", callsFile="calls.
         calls = {}
         with open(callsFile) as f:
             calls = json.load(f)
+        for um in list(calls.keys()): 
+            for timestamp in calls[um]:
+                for i, dm in enumerate(calls[um][timestamp]):
+                    calls[um][timestamp][i] = renamed_containers[dm]
+            calls[renamed_containers[um]] = calls.pop(um)
+        with open(callsFile.split(".")[0] + "_mapped.json", "w") as f:
+            json.dump(calls, f)
         return renamed_containers.values(), calls
     containers = read_container_names(containersFile)
     renamed_containers = {container: f"s{i}" for i, container in enumerate(containers, 1)}
@@ -56,12 +63,47 @@ def get_and_rename_containers(containersFile="containers.txt", callsFile="calls.
         calls[renamed_containers[um]] = calls.pop(um)
     with open(mappedContainersFile, "w") as f:
         json.dump(renamed_containers, f)
+    with open(callsFile.split(".")[0] + "_mapped.json", "w") as f:
+        json.dump(calls, f)
     return renamed_containers.values(), calls
 
+def addContainerJob(container_names):
+    while True:
+        print("Menu: ")
+        print("1. All Containers are sleeping")
+        print("2. No Containers are sleeping")
+        print("3. Some Containers are sleeping")
+        option = input("Enter your choice (1/2/3): ").strip()
+        match option:
+            case '1': 
+                return [[container_name, 0] for container_name in container_names]
+            case '2': 
+                return [[container_name, 1] for container_name in container_names]
+            case '3':
+                print("You can enter the containers that are working in ranges like 1-5, 7-10")
+                print("1-1(includes both 1 and 1), 1-4(includes 1, 2, 3, 4)")
+                containersWorking = input("Enter the containers that are working: ").replace(" ", "").split(",")
+                for i in range(len(container_names)):
+                    start, end = containersWorking[i].split("-")
+                    containersWorking[i] = [int(start), int(end)]
+                n = len(container_names) 
+                container_names = [[container_name, 0] for container_name in container_names]
+                for start, end in containersWorking:
+                    for index in range(start, end + 1):
+                        if index < n:
+                            container_names[index][1] = 1
+                return container_names
+            case _:
+                print("Invalid choice. Please try again.")
+
+
+
 # Function to create and run a container
-def create_container(container_name, network_name, data, ip_address):
+def create_container(container_name, network_name, data, ip_address, container_job):
     print(network_name)
     json_file_path = create_json_file(container_name, data)
+    print(container_name)
+    print(container_job)
     container = client.containers.run(
         "flask-contact-container",
         name=container_name,
@@ -70,7 +112,9 @@ def create_container(container_name, network_name, data, ip_address):
         network=network_name,
         ports={'80/tcp': None},
         environment={"CONTAINER_NAME": container_name,
-                     "REDIS_IP_ADDRESS": ip_address},
+                     "REDIS_IP_ADDRESS": ip_address,
+                     "CONTIANER_JOB": container_job
+                     }
     )
     os.system(f"docker cp ./{container_name}.json {container.id}:/app/calls.json")
     os.remove(json_file_path)
@@ -114,6 +158,7 @@ def main():
 
     # Read container names from file
     container_names, calls = get_and_rename_containers() 
+    container_names = addContainerJob(container_names)
 
     #Create Redis Container
     redis_container = create_redis_container(network_name)
@@ -127,7 +172,7 @@ def main():
     print("Logging container is up and running.")
 
     # # Create and run containers
-    containers = [create_container(name, network_name, calls[name] if name in calls else {}, ip_address) for name in container_names]
+    containers = [create_container(name, network_name, calls[name] if name in calls else {}, ip_address, job) for name, job in container_names]
 
     print("All containers are up and running.")
 
