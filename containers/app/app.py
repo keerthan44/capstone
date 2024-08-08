@@ -32,7 +32,7 @@ def contact_containers(calls):
         time.sleep(1)
     if container_job == '0':
         while True:
-            timestamp = int(time.time()) - start_time
+            timestamp = time.time_ns() // 1000 - start_time
             timestamps = []
             for _ in range(0, len(calls_list)):
                 if calls_list[0] > timestamp:
@@ -51,8 +51,11 @@ def contact_containers(calls):
                     except requests.exceptions.RequestException as e:
                         print(f"Failed to contact {container[:5]}: {e}", file=sys.stderr)
             if calls_list:
-                sleep_time = calls_list[0] - (int(time.time()) - start_time)
-                time.sleep(sleep_time)
+                sleep_time = calls_list[0] - (time.time_ns() // 1000 - start_time)
+                if sleep_time < 0:
+                    time.sleep(0.00001)
+                else:
+                    time.sleep(sleep_time / 1000000)
     else:    
         stop_event = threading.Event()
         
@@ -67,7 +70,7 @@ def contact_containers(calls):
         bg_thread.start()
         
         while True:
-            timestamp = int(time.time()) - start_time
+            timestamp = time.time_ns() // 1000 - start_time
             timestamps = []
             for _ in range(0, len(calls_list)):
                 if calls_list[0] > timestamp:
@@ -99,7 +102,7 @@ def contact_containers(calls):
                 bg_thread.start()
             
             if calls_list:
-                sleep_time = calls_list[0] - (int(time.time()) - start_time)
+                sleep_time = calls_list[0] - (time.time_ns() // 1000 - start_time)
                 time.sleep(sleep_time)
             else:
                 break

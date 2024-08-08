@@ -83,7 +83,8 @@ def addContainerJob(container_names):
                 print("You can enter the containers that are working in ranges like 1-5, 7-10")
                 print("1-1(includes both 1 and 1), 1-4(includes 1, 2, 3, 4)")
                 containersWorking = input("Enter the containers that are working: ").replace(" ", "").split(",")
-                for i in range(len(container_names)):
+                print(containersWorking)
+                for i in range(len(containersWorking)):
                     start, end = containersWorking[i].split("-")
                     containersWorking[i] = [int(start), int(end)]
                 n = len(container_names) 
@@ -177,7 +178,7 @@ def main():
     print("All containers are up and running.")
 
     redis_client = redis.StrictRedis(host=ip_address, port=6379)
-    redis_client.set('start_time', int(time.time()))
+    redis_client.set('start_time', time.time_ns() // 1000)
 
     print("Redis Start Time value is now set at", redis_client.get('start_time'))
     print("Containers will start communicating")

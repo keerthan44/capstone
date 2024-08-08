@@ -1,0 +1,57 @@
+ * Serving Flask app 'app'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:80
+ * Running on http://172.18.0.3:80
+[33mPress CTRL+C to quit[0m
+[400114] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:15] "POST /logs HTTP/1.1" 200 -
+[90017] s3 received request from s2. Start time: 1721890035345499
+172.18.0.6 - - [25/Jul/2024 06:47:16] "POST /logs HTTP/1.1" 200 -
+[90017] s2 received request from s2. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:16] "POST /logs HTTP/1.1" 200 -
+[90017] s2 received request from s2. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:16] "POST /logs HTTP/1.1" 200 -
+[1135618] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:16] "POST /logs HTTP/1.1" 200 -
+[1177798] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:16] "POST /logs HTTP/1.1" 200 -
+[1206082] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:16] "POST /logs HTTP/1.1" 200 -
+[237447] s3 received request from s3. Start time: 1721890035345499
+172.18.0.6 - - [25/Jul/2024 06:47:16] "POST /logs HTTP/1.1" 200 -
+[237447] s3 received request from s3. Start time: 1721890035345499
+172.18.0.6 - - [25/Jul/2024 06:47:16] "POST /logs HTTP/1.1" 200 -
+[1270156] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:16] "POST /logs HTTP/1.1" 200 -
+[1446766] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:16] "POST /logs HTTP/1.1" 200 -
+[2483191] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:17] "POST /logs HTTP/1.1" 200 -
+[2631627] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:17] "POST /logs HTTP/1.1" 200 -
+[3123214] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:18] "POST /logs HTTP/1.1" 200 -
+[3273449] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:18] "POST /logs HTTP/1.1" 200 -
+[3679424] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:19] "POST /logs HTTP/1.1" 200 -
+[3686738] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:19] "POST /logs HTTP/1.1" 200 -
+[4344965] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:19] "POST /logs HTTP/1.1" 200 -
+[4350486] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:19] "POST /logs HTTP/1.1" 200 -
+[4383963] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:19] "POST /logs HTTP/1.1" 200 -
+[4740221] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:20] "POST /logs HTTP/1.1" 200 -
+[4866097] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:20] "POST /logs HTTP/1.1" 200 -
+[5299674] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:20] "POST /logs HTTP/1.1" 200 -
+[5299674] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:20] "POST /logs HTTP/1.1" 200 -
+[5521299] s2 received request from s1. Start time: 1721890035345499
+172.18.0.5 - - [25/Jul/2024 06:47:20] "POST /logs HTTP/1.1" 200 -
