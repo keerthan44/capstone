@@ -140,7 +140,7 @@ def create_redis_container(network_name):
         "redis:latest", 
         name="redis_capstone", 
         hostname="redis_capstone", 
-        ports={'6379/tcp': None}, 
+        ports={'6379/tcp': 60892}, 
         detach=True,
         network=network_name
     )
@@ -166,6 +166,7 @@ def main():
     redis_container.reload()
     # print(redis_container.attrs['NetworkSettings'])
     ip_address = redis_container.attrs['NetworkSettings']["Networks"][network_name]["IPAddress"]
+    print(ip_address)
     print("Redis container is up and running.")
 
     # Create Logging Container
@@ -177,7 +178,7 @@ def main():
 
     print("All containers are up and running.")
 
-    redis_client = redis.StrictRedis(host=ip_address, port=6379)
+    redis_client = redis.StrictRedis(host="localhost", port=60892)
     redis_client.set('start_time', time.time_ns() // 1000)
 
     print("Redis Start Time value is now set at", redis_client.get('start_time'))
