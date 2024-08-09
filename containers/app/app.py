@@ -17,7 +17,6 @@ redis_client = redis.StrictRedis(host=redis_ip, port=6379)
 start_time = ''
 
 
-
 def contact_containers(calls):
     calls_list = list(map(int, calls.keys()))
     calls_list.sort()
@@ -30,9 +29,10 @@ def contact_containers(calls):
             start_time = int(redis_client.get('start_time'))
             break
         time.sleep(1)
+    
     if container_job == '0':
         while True:
-            timestamp = time.time_ns() // 1000 - start_time
+            timestamp = (time.time_ns() - start_time) // 1_000_000   # Convert to milliseconds
             timestamps = []
             for _ in range(0, len(calls_list)):
                 if calls_list[0] > timestamp:
@@ -51,11 +51,11 @@ def contact_containers(calls):
                     except requests.exceptions.RequestException as e:
                         print(f"Failed to contact {container[:5]}: {e}", file=sys.stderr)
             if calls_list:
-                sleep_time = calls_list[0] - (time.time_ns() // 1000 - start_time)
-                if sleep_time < 0:
+                sleep_time_sec = (calls_list[0] - (time.time_ns() // 1_000_000 - start_time)) / 1_000
+                if sleep_time_sec < 0:
                     time.sleep(0.00001)
                 else:
-                    time.sleep(sleep_time / 1000000)
+                    time.sleep(sleep_time_sec)
     else:    
         stop_event = threading.Event()
         
@@ -70,7 +70,7 @@ def contact_containers(calls):
         bg_thread.start()
         
         while True:
-            timestamp = time.time_ns() // 1000 - start_time
+            timestamp = time.time_ns() // 1_000_000 - start_time  # Convert to milliseconds
             timestamps = []
             for _ in range(0, len(calls_list)):
                 if calls_list[0] > timestamp:
@@ -102,8 +102,8 @@ def contact_containers(calls):
                 bg_thread.start()
             
             if calls_list:
-                sleep_time = calls_list[0] - (time.time_ns() // 1000 - start_time)
-                time.sleep(sleep_time)
+                sleep_time_sec = (calls_list[0] - (time.time_ns() // 1_000_000 - start_time)) / 1_000
+                time.sleep(sleep_time_sec)
             else:
                 break
 
