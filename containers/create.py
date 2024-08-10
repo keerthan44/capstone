@@ -36,35 +36,63 @@ def read_container_names(file_path):
 
 def get_and_rename_containers(containersFile="containers.txt", callsFile="calls.json"):
     mappedContainersFile = "".join(containersFile.split(".")[0]) + "_mapped.json"
+    
+    # Check if the mapped containers file already exists
     if os.path.isfile(mappedContainersFile):
         with open(mappedContainersFile) as f:
             renamed_containers = json.load(f)
-        calls = {}
+        
         with open(callsFile) as f:
             calls = json.load(f)
-        for um in list(calls.keys()): 
+        
+        for um in list(calls.keys()):
             for timestamp in calls[um]:
-                for i, dm in enumerate(calls[um][timestamp]):
-                    calls[um][timestamp][i] = renamed_containers[dm]
-            calls[renamed_containers[um]] = calls.pop(um)
+                for i, dm_entry in enumerate(calls[um][timestamp]):
+                    dm_service = dm_entry['dm_service']
+                    if dm_service not in renamed_containers:
+                        print(f"Warning: {dm_service} not found in renamed_containers. Skipping.")
+                        continue
+                    # Rename the dm_service field
+                    calls[um][timestamp][i]['dm_service'] = renamed_containers[dm_service]
+            if um in renamed_containers:
+                calls[renamed_containers[um]] = calls.pop(um)
+            else:
+                print(f"Warning: {um} not found in renamed_containers. Skipping.")
+        
+        # Write the renamed calls to a new mapped file
         with open(callsFile.split(".")[0] + "_mapped.json", "w") as f:
-            json.dump(calls, f)
+            json.dump(calls, f, indent=4)
         return renamed_containers.values(), calls
+    
+    # If mapped containers file doesn't exist, proceed with renaming
     containers = read_container_names(containersFile)
     renamed_containers = {container: f"s{i}" for i, container in enumerate(containers, 1)}
-    calls = {}
+    
     with open(callsFile) as f:
         calls = json.load(f)
-
-    for um in list(calls.keys()): 
+    
+    for um in list(calls.keys()):
         for timestamp in calls[um]:
-            for i, dm in enumerate(calls[um][timestamp]):
-                calls[um][timestamp][i] = renamed_containers[dm]
-        calls[renamed_containers[um]] = calls.pop(um)
+            for i, dm_entry in enumerate(calls[um][timestamp]):
+                dm_service = dm_entry['dm_service']
+                if dm_service not in renamed_containers:
+                    print(f"Warning: {dm_service} not found in renamed_containers. Skipping.")
+                    continue
+                # Rename the dm_service field
+                calls[um][timestamp][i]['dm_service'] = renamed_containers[dm_service]
+        if um in renamed_containers:
+            calls[renamed_containers[um]] = calls.pop(um)
+        else:
+            print(f"Warning: {um} not found in renamed_containers. Skipping.")
+    
+    # Write the renamed containers to a mapped file
     with open(mappedContainersFile, "w") as f:
-        json.dump(renamed_containers, f)
+        json.dump(renamed_containers, f, indent=4)
+    
+    # Write the renamed calls to a new mapped file
     with open(callsFile.split(".")[0] + "_mapped.json", "w") as f:
-        json.dump(calls, f)
+        json.dump(calls, f, indent=4)
+    
     return renamed_containers.values(), calls
 
 def addContainerJob(container_names):
@@ -97,8 +125,6 @@ def addContainerJob(container_names):
             case _:
                 print("Invalid choice. Please try again.")
 
-
-
 # Function to create and run a container
 def create_container(container_name, network_name, data, ip_address, container_job):
     print(network_name)
@@ -114,7 +140,7 @@ def create_container(container_name, network_name, data, ip_address, container_j
         ports={'80/tcp': None},
         environment={"CONTAINER_NAME": container_name,
                      "REDIS_IP_ADDRESS": ip_address,
-                     "CONTIANER_JOB": container_job
+                     "CONTAINER_JOB": container_job
                      }
     )
     os.system(f"docker cp ./{container_name}.json {container.id}:/app/calls.json")
@@ -146,8 +172,6 @@ def create_redis_container(network_name):
     )
     print(f"Redis container started with ID: {container.id}")
     return container
-    # ip_add = container.attrs['NetworkSettings']["Networks"][network_name]["IPAddress"]
-
 
 # Main function
 def main():
@@ -161,10 +185,9 @@ def main():
     container_names, calls = get_and_rename_containers() 
     container_names = addContainerJob(container_names)
 
-    #Create Redis Container
+    # Create Redis Container
     redis_container = create_redis_container(network_name)
     redis_container.reload()
-    # print(redis_container.attrs['NetworkSettings'])
     ip_address = redis_container.attrs['NetworkSettings']["Networks"][network_name]["IPAddress"]
     print(ip_address)
     print("Redis container is up and running.")
@@ -173,18 +196,17 @@ def main():
     create_logging_container(network_name, ip_address)
     print("Logging container is up and running.")
 
-    # # Create and run containers
+    # Create and run containers
     containers = [create_container(name, network_name, calls[name] if name in calls else {}, ip_address, job) for name, job in container_names]
 
     print("All containers are up and running.")
 
     redis_client = redis.StrictRedis(host="localhost", port=60892)
-    redis_client.set('start_time', time.time_ns() // 1000)
+    redis_client.set('start_time', time.time_ns() // 1000)  # Store time in microseconds
 
     print("Redis Start Time value is now set at", redis_client.get('start_time'))
     print("Containers will start communicating")
 
-
-
 if __name__ == "__main__":
     main()
+
