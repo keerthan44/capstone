@@ -183,6 +183,7 @@ def main():
 
     # Read container names from file
     container_names, calls = get_and_rename_containers() 
+    print(container_names)
     container_names = addContainerJob(container_names)
 
     # Create Redis Container
@@ -202,7 +203,7 @@ def main():
     print("All containers are up and running.")
 
     redis_client = redis.StrictRedis(host="localhost", port=60892)
-    redis_client.set('start_time', time.time_ns() // 1000)  # Store time in microseconds
+    redis_client.set('start_time', time.time_ns())  # Store time in miliseconds
 
     print("Redis Start Time value is now set at", redis_client.get('start_time'))
     print("Containers will start communicating")

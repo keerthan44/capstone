@@ -12,9 +12,46 @@ app = Flask(__name__)
 
 container_name = os.environ.get("CONTAINER_NAME")
 redis_ip = os.environ.get("REDIS_IP_ADDRESS")
-container_job = os.environ.get("CONTIANER_JOB")
+container_job = os.environ.get("CONTAINER_JOB")
 redis_client = redis.StrictRedis(host=redis_ip, port=6379)
 start_time = ''
+
+def get_timestamp_to_call(start_time, calls_list):
+    timestamp = (time.time_ns() - start_time) // 1_000_000   # Convert to milliseconds
+    timestamps = []
+    for _ in range(0, len(calls_list)):
+        if calls_list[0] > timestamp:
+            break
+        timestamps.append(calls_list.pop(0))
+    return timestamp, timestamps
+
+def get_containers_to_call(calls, timestamps):
+    containers = []
+    for tempTimeStamp in timestamps:
+        containers.extend(calls[str(tempTimeStamp)])
+    return containers
+
+def call_containers(containers, timestamp):
+    for container in containers:
+        dm_service = container['dm_service']
+        try:
+            print(f"sent request to {dm_service}", file=sys.stderr)
+            response = requests.post(f"http://{dm_service}/", 
+                                    json={"timestamp": timestamp, "um": container_name})
+            print(f"Contacted {dm_service}: {response.text}", file=sys.stderr)
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to contact {dm_service}: {e}", file=sys.stderr)
+
+def sleep_according_to_call_list(calls_list, start_time):
+    if calls_list:
+        sleep_time_sec = (calls_list[0] - (time.time_ns() - start_time) // 1_000_000) / 1_000
+        if sleep_time_sec < 0:
+            time.sleep(0.00001)
+        else:
+            time.sleep(sleep_time_sec)
+        return 'slept'
+    else:
+        return 'not_slept'
 
 
 def contact_containers(calls):
@@ -28,34 +65,17 @@ def contact_containers(calls):
             print("start_time found")
             start_time = int(redis_client.get('start_time'))
             break
-        time.sleep(1)
+        time.sleep(0.000001)
     
     if container_job == '0':
         while True:
-            timestamp = (time.time_ns() - start_time) // 1_000_000   # Convert to milliseconds
-            timestamps = []
-            for _ in range(0, len(calls_list)):
-                if calls_list[0] > timestamp:
-                    break
-                timestamps.append(calls_list.pop(0))
-            containers = []
-            for tempTimeStamp in timestamps:
-                containers.extend(calls[str(tempTimeStamp)])
+            timestamp, timestamps = get_timestamp_to_call(start_time, calls_list)
+            containers = get_containers_to_call(calls, timestamps)
             if containers:
-                for container in containers:
-                    try:
-                        print(f"sent request to {container}", file=sys.stderr)
-                        response = requests.post(f"http://{container[:5]}/", 
-                                                json={"timestamp": timestamp, "um": container_name})
-                        print(f"Contacted {container}: {response.text}", file=sys.stderr)
-                    except requests.exceptions.RequestException as e:
-                        print(f"Failed to contact {container[:5]}: {e}", file=sys.stderr)
-            if calls_list:
-                sleep_time_sec = (calls_list[0] - (time.time_ns() // 1_000_000 - start_time)) / 1_000
-                if sleep_time_sec < 0:
-                    time.sleep(0.00001)
-                else:
-                    time.sleep(sleep_time_sec)
+                call_containers(containers, timestamp)
+            if sleep_according_to_call_list(calls_list, start_time) == 'not_slept':
+                break
+
     else:    
         stop_event = threading.Event()
         
@@ -70,41 +90,21 @@ def contact_containers(calls):
         bg_thread.start()
         
         while True:
-            timestamp = time.time_ns() // 1_000_000 - start_time  # Convert to milliseconds
-            timestamps = []
-            for _ in range(0, len(calls_list)):
-                if calls_list[0] > timestamp:
-                    break
-                timestamps.append(calls_list.pop(0))
-            print(timestamps)
-            containers = []
-            for tempTimeStamp in timestamps:
-                containers.extend(calls[str(tempTimeStamp)])
-            print(containers)
-            
+            timestamp, timestamps = get_timestamp_to_call(start_time, calls_list)
+            containers = get_containers_to_call(calls, timestamps)
             if containers:
                 # Pause the background task
                 stop_event.set()
                 bg_thread.join()
                 
-                for container in containers:
-                    try:
-                        print(f"sent request to {container}", file=sys.stderr)
-                        response = requests.post(f"http://{container[:5]}/", 
-                                                json={"timestamp": timestamp, "um": container_name})
-                        print(f"Contacted {container}: {response.text}", file=sys.stderr)
-                    except requests.exceptions.RequestException as e:
-                        print(f"Failed to contact {container[:5]}: {e}", file=sys.stderr)
+                call_containers(containers, timestamp)
                 
                 # Reset the stop event and restart the background task
                 stop_event.clear()
                 bg_thread = threading.Thread(target=background_task)
                 bg_thread.start()
             
-            if calls_list:
-                sleep_time_sec = (calls_list[0] - (time.time_ns() // 1_000_000 - start_time)) / 1_000
-                time.sleep(sleep_time_sec)
-            else:
+            if sleep_according_to_call_list(calls_list, start_time) == 'not_slept':
                 break
 
 @app.route('/', methods=['POST'])
