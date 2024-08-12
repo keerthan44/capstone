@@ -7,6 +7,7 @@ def convertJSON(data):
         timestamp = row['timestamp']
         um = row['um']
         dm = row['dm']
+        rpctype = 'http'
 
         if '?' in um or '?' in dm:
             continue
@@ -20,7 +21,10 @@ def convertJSON(data):
 
         if timestamp not in result[um]:
             result[um][timestamp] = []
-        result[um][timestamp].append(dm)
+        result[um][timestamp].append({
+            "dm_service": dm,
+            "communication_type": rpctype
+        })
     
     with open('../containers/calls.json', 'w') as f:
         json.dump(result, f)

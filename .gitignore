@@ -1,5 +1,5 @@
 dummy
-./containers/calls*.json
-./containers/containers*.json
-./containers/containers*.txt
+/containers/calls*.json
+/containers/containers*.json
+/containers/containers*.txt
 
