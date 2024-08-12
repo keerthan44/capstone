@@ -32,13 +32,17 @@ def get_containers_to_call(calls, timestamps):
     return containers
 
 def call_containers(containers, timestamp):
+    print(f"Time: {timestamp}", file=sys.stderr)
     for container in containers:
         dm_service = container['dm_service']
+        communication_type = container['communication_type']
         try:
-            print(f"sent request to {dm_service}", file=sys.stderr)
-            response = requests.post(f"http://{dm_service}/", 
-                                    json={"timestamp": timestamp, "um": container_name})
-            print(f"Contacted {dm_service}: {response.text}", file=sys.stderr)
+            print(f"sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
+            match communication_type:
+                case _:
+                    response = requests.post(f"http://{dm_service}/", 
+                                            json={"timestamp": timestamp, "um": container_name})
+            print(f"Contacted {dm_service} with communication_type {communication_type}: {response.text}", file=sys.stderr)
         except requests.exceptions.RequestException as e:
             print(f"Failed to contact {dm_service}: {e}", file=sys.stderr)
 
@@ -70,6 +74,7 @@ def contact_containers(calls):
     if container_job == '0':
         while True:
             timestamp, timestamps = get_timestamp_to_call(start_time, calls_list)
+            print(timestamp, timestamps, file=sys.stderr)
             containers = get_containers_to_call(calls, timestamps)
             if containers:
                 call_containers(containers, timestamp)

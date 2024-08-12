@@ -3,6 +3,7 @@ import os
 import json
 import redis
 import time
+import sys
 
 # Initialize Docker client
 client = docker.from_env()
@@ -173,6 +174,14 @@ def create_redis_container(network_name):
     print(f"Redis container started with ID: {container.id}")
     return container
 
+def fancy_wait(seconds):
+    print("Redis start time will be set in:")
+    for i in range(seconds, 0, -1):
+        sys.stdout.write(f"\r{i} seconds remaining...")
+        sys.stdout.flush()
+        time.sleep(1)
+    print("\rTime to start Redis!             ")
+
 # Main function
 def main():
     network_name = "static_application"
@@ -199,7 +208,7 @@ def main():
 
     # Create and run containers
     containers = [create_container(name, network_name, calls[name] if name in calls else {}, ip_address, job) for name, job in container_names]
-
+    fancy_wait(6) 
     print("All containers are up and running.")
 
     redis_client = redis.StrictRedis(host="localhost", port=60892)
