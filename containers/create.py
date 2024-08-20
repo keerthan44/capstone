@@ -1,34 +1,20 @@
-import docker
 import os
 import json
-import redis
 import time
 import sys
+from kubernetes import client, config, utils
+from kubernetes.client import V1Pod, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1Deployment, V1DeploymentSpec, V1PodTemplateSpec, V1LabelSelector
+from dotenv import load_dotenv
 
-# Initialize Docker client
-client = docker.from_env()
+load_dotenv()  # take environment variables from .env.
 
-# Function to check if the network exists
-def get_or_create_network(network_name):
-    try:
-        network = client.networks.get(network_name)
-        print(f"Network '{network_name}' already exists.")
-    except docker.errors.NotFound:
-        network = client.networks.create(network_name)
-        print(f"Network '{network_name}' created.")
-    return network
+# Load the Kubernetes configuration
+config.load_kube_config()
 
-def create_json_file(container_name, data):
-    # Generate JSON data specific to the container
-    json_data = data
-    
-    print(data)
-    # Create a temporary file with the JSON data
-    with open(f"{container_name}.json", "w") as temp_file:
-        json.dump(json_data, temp_file)
-        temp_file_path = temp_file.name
-
-    return temp_file_path
+# Kubernetes API client
+v1 = client.CoreV1Api()
+apps_v1 = client.AppsV1Api()
+dockerUsername = os.getenv("DOCKER_USERNAME")
 
 # Function to read container names from a file
 def read_container_names(file_path):
@@ -126,97 +112,131 @@ def addContainerJob(container_names):
             case _:
                 print("Invalid choice. Please try again.")
 
-# Function to create and run a container
-def create_container(container_name, network_name, data, ip_address, container_job):
-    print(network_name)
-    json_file_path = create_json_file(container_name, data)
-    print(container_name)
-    print(container_job)
-    container = client.containers.run(
-        "flask-contact-container",
+def get_or_create_namespace(namespace_name):
+    try:
+        v1.read_namespace(name=namespace_name)
+        print(f"Namespace '{namespace_name}' already exists.")
+    except client.exceptions.ApiException as e:
+        if e.status == 404:
+            v1.create_namespace(client.V1Namespace(metadata=client.V1ObjectMeta(name=namespace_name)))
+            print(f"Namespace '{namespace_name}' created.")
+        else:
+            raise
+
+def create_config_map(namespace, config_name, data):
+    config_map = client.V1ConfigMap(
+        metadata=client.V1ObjectMeta(name=config_name, namespace=namespace),
+        data=data
+    )
+    v1.create_namespaced_config_map(namespace=namespace, body=config_map)
+    print(f"ConfigMap '{config_name}' created in namespace '{namespace}'.")
+
+def create_redis_service(namespace):
+    service = V1Service(
+        metadata=V1ObjectMeta(name="redis-service", namespace=namespace),
+        spec=V1ServiceSpec(
+            selector={"app": "redis"},
+            ports=[V1ServicePort(port=6379, target_port=6379)]
+        )
+    )
+    v1.create_namespaced_service(namespace=namespace, body=service)
+    print(f"Redis Service created in namespace '{namespace}'.")
+
+def create_redis_deployment(namespace):
+    container = V1Container(
+        name="redis",
+        image="redis:latest",
+        ports=[client.V1ContainerPort(container_port=6379)]
+    )
+    pod_spec = V1PodSpec(containers=[container])
+    template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": "redis"}), spec=pod_spec)
+    spec = V1DeploymentSpec(replicas=1, template=template, selector=V1LabelSelector(match_labels={"app": "redis"}))
+    deployment = V1Deployment(metadata=V1ObjectMeta(name="redis-deployment", namespace=namespace), spec=spec)
+    
+    apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
+    print(f"Redis Deployment created in namespace '{namespace}'.")
+
+def create_logging_service(namespace):
+    service = V1Service(
+        metadata=V1ObjectMeta(name="logging-service", namespace=namespace),
+        spec=V1ServiceSpec(
+            selector={"app": "logging"},
+            ports=[V1ServicePort(port=80, target_port=80)]
+        )
+    )
+    v1.create_namespaced_service(namespace=namespace, body=service)
+    print(f"Logging Service created in namespace '{namespace}'.")
+
+def create_logging_deployment(namespace, redis_ip):
+    container = V1Container(
+        name="logging-container",
+        image=f"logging_capstone",
+        env=[client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip)],
+        ports=[client.V1ContainerPort(container_port=80)],
+        image_pull_policy="Never"  # Set the image pull policy to Never
+    )
+    pod_spec = V1PodSpec(containers=[container])
+    template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": "logging"}), spec=pod_spec)
+    spec = V1DeploymentSpec(replicas=1, template=template, selector=V1LabelSelector(match_labels={"app": "logging"}))
+    deployment = V1Deployment(metadata=V1ObjectMeta(name="logging-deployment", namespace=namespace), spec=spec)
+    
+    apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
+    print(f"Logging Deployment created in namespace '{namespace}'.")
+
+def create_container_deployment(namespace, container_name, config_map_name, redis_ip, container_job):
+    container = V1Container(
         name=container_name,
-        hostname=container_name[:5],
-        detach=True,
-        network=network_name,
-        ports={'80/tcp': None},
-        environment={"CONTAINER_NAME": container_name,
-                     "REDIS_IP_ADDRESS": ip_address,
-                     "CONTAINER_JOB": container_job
-                     }
+        image=f"flask-contact-container",
+        env=[
+            client.V1EnvVar(name="CONTAINER_NAME", value=container_name),
+            client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip),
+            client.V1EnvVar(name="CONTAINER_JOB", value=str(container_job))
+        ],
+        volume_mounts=[client.V1VolumeMount(mount_path="/app/calls.json", sub_path="calls.json", name="config-volume")],
+        image_pull_policy="Never"  # Set the image pull policy to Never
     )
-    os.system(f"docker cp ./{container_name}.json {container.id}:/app/calls.json")
-    os.remove(json_file_path)
-    print(f"Container '{container_name}' created and started.")
-    return container
-
-def create_logging_container(network_name, redis_ip):
-    container = client.containers.run(
-        'logging_capstone',
-        name="logging_capstone",
-        hostname='logging_capstone',
-        detach=True,
-        network=network_name,
-        ports={'80/tcp': None},
-        environment={"REDIS_IP_ADDRESS": redis_ip}
+    
+    volume = client.V1Volume(
+        name="config-volume",
+        config_map=client.V1ConfigMapVolumeSource(name=config_map_name)
     )
-    print(f"Logging Container '{container.id}' created and started.")
-    return container
 
-def create_redis_container(network_name):
-    container = client.containers.run(
-        "redis:latest", 
-        name="redis_capstone", 
-        hostname="redis_capstone", 
-        ports={'6379/tcp': 60892}, 
-        detach=True,
-        network=network_name
-    )
-    print(f"Redis container started with ID: {container.id}")
-    return container
+    pod_spec = V1PodSpec(containers=[container], volumes=[volume])
+    template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": container_name}), spec=pod_spec)
+    spec = V1DeploymentSpec(replicas=1, template=template, selector=V1LabelSelector(match_labels={"app": container_name}))
+    deployment = V1Deployment(metadata=V1ObjectMeta(name=f"{container_name}-deployment", namespace=namespace), spec=spec)
+    
+    apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
+    print(f"Deployment '{container_name}' created in namespace '{namespace}'.")
 
-def fancy_wait(seconds):
-    print("Redis start time will be set in:")
-    for i in range(seconds, 0, -1):
-        sys.stdout.write(f"\r{i} seconds remaining...")
-        sys.stdout.flush()
-        time.sleep(1)
-    print("\rTime to start Redis!             ")
-
-# Main function
 def main():
-    network_name = "static_application"
+    namespace = os.getenv("KUBERNETES_NAMESPACE", "static-application")
     container_names_file = "containers.txt"
+    
+    # Ensure the namespace exists
+    get_or_create_namespace(namespace)
 
-    # Ensure the network exists
-    network = get_or_create_network(network_name)
+    # Read container names from file and get renamed containers
+    container_names, calls = get_and_rename_containers()
 
-    # Read container names from file
-    container_names, calls = get_and_rename_containers() 
-    print(container_names)
-    container_names = addContainerJob(container_names)
+    # Create Redis deployment and service
+    create_redis_deployment(namespace)
+    create_redis_service(namespace)
+    
+    # Create Logging deployment and service
+    create_logging_deployment(namespace, redis_ip="redis-service")
+    create_logging_service(namespace)
 
-    # Create Redis Container
-    redis_container = create_redis_container(network_name)
-    redis_container.reload()
-    ip_address = redis_container.attrs['NetworkSettings']["Networks"][network_name]["IPAddress"]
-    print(ip_address)
-    print("Redis container is up and running.")
+    # Create ConfigMap for each container's calls.json
+    for container_name in container_names:
+        create_config_map(namespace, f"{container_name}-config", data=json.dumps(calls.get(container_name, {})))
 
-    # Create Logging Container
-    create_logging_container(network_name, ip_address)
-    print("Logging container is up and running.")
-
-    # Create and run containers
-    containers = [create_container(name, network_name, calls[name] if name in calls else {}, ip_address, job) for name, job in container_names]
-    fancy_wait(6) 
-    print("All containers are up and running.")
-
-    redis_client = redis.StrictRedis(host="localhost", port=60892)
-    redis_client.set('start_time', time.time_ns())  # Store time in miliseconds
-
-    print("Redis Start Time value is now set at", redis_client.get('start_time'))
-    print("Containers will start communicating")
+    # Create deployments for containers
+    container_jobs = addContainerJob(container_names)
+    for container_name, container_job in container_jobs:
+        create_container_deployment(namespace, container_name, f"{container_name}-config", redis_ip="redis-service", container_job=container_job)
+    
+    print("All deployments are up and running in Kubernetes.")
 
 if __name__ == "__main__":
     main()
-
