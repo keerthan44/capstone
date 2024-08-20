@@ -23,6 +23,11 @@ if these steps didn't work for you, then go to [Minikube Official Page](https://
 ```shell
 minikube start --driver=docker
 ```
+4. Add ./containers/.env
+```shell
+DOCKER_USERNAME=<your_dockerhub_username>, # not used as of now
+KUBERNETES_NAMESPACE=<your_k8s_namespace>, # this is used to create a namespace for all the microservices
+```
 ## Step 1: Build the flask worker container and push to minikube
 ```shell
 eval $(minikube docker-env)
