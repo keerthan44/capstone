@@ -1,0 +1,12 @@
+kubernetes
+
+Flask
+
+python-dotenv
+
+redis
+
+pandas
+
+requests
+
