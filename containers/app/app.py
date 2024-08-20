@@ -13,7 +13,8 @@ app = Flask(__name__)
 container_name = os.environ.get("CONTAINER_NAME")
 redis_ip = os.environ.get("REDIS_IP_ADDRESS")
 container_job = os.environ.get("CONTAINER_JOB")
-redis_client = redis.StrictRedis(host=redis_ip, port=6379)
+namespace = os.environ.get("NAMESPACE")
+redis_client = redis.StrictRedis(host=f'{redis_ip}', port=6379)
 start_time = ''
 
 def get_timestamp_to_call(start_time, calls_list):
@@ -36,15 +37,15 @@ def call_containers(containers, timestamp):
     for container in containers:
         dm_service = container['dm_service']
         communication_type = container['communication_type']
-        try:
-            print(f"sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
-            match communication_type:
-                case _:
-                    response = requests.post(f"http://{dm_service}/", 
+        print(f"sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
+        match communication_type:
+            case _:
+                try:
+                    response = requests.post(f"http://{dm_service}-service/", 
                                             json={"timestamp": timestamp, "um": container_name})
-            print(f"Contacted {dm_service} with communication_type {communication_type}: {response.text}", file=sys.stderr)
-        except requests.exceptions.RequestException as e:
-            print(f"Failed to contact {dm_service}: {e}", file=sys.stderr)
+                    print(f"Contacted {dm_service} with communication_type {communication_type}: {response.text}", file=sys.stderr)
+                except requests.exceptions.RequestException as e:
+                    print(f"Failed to contact {dm_service}: {e}", file=sys.stderr)
 
 def sleep_according_to_call_list(calls_list, start_time):
     if calls_list:
@@ -118,7 +119,7 @@ def home():
     # log
     print(data, start_time)
     try:
-        response = requests.post(f"http://logging_capstone/logs", 
+        response = requests.post(f"http://logging-service/logs", 
                                     json={"timestamp": data["timestamp"], 
                                           "dm": container_name,
                                           "um": data['um']

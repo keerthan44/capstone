@@ -12,5 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the application code
 COPY app.py .
 
+ENV PYTHONUNBUFFERED=1
+
 # Define the command to run the application
 CMD ["python", "app.py"]

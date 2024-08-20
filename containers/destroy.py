@@ -21,7 +21,7 @@ def delete_namespace(namespace_name, timeout=300, interval=5):
     try:
         # Check if the namespace exists
         namespaces = v1.list_namespace()
-        namespace_names = [ns.metadata.name for ns in namespaces.items]
+        namespace_names = {ns.metadata.name for ns in namespaces.items}
         
         if namespace_name not in namespace_names:
             logger.warning(f"Namespace '{namespace_name}' does not exist.")
@@ -33,14 +33,7 @@ def delete_namespace(namespace_name, timeout=300, interval=5):
         
         # Wait until the namespace is deleted
         start_time = time.time()
-        while True:
-            namespaces = v1.list_namespace()
-            namespace_names = [ns.metadata.name for ns in namespaces.items]
-            
-            if namespace_name not in namespace_names:
-                logger.info(f"Namespace '{namespace_name}' has been deleted.")
-                break
-            
+        while namespace_name in namespace_names:
             elapsed_time = time.time() - start_time
             if elapsed_time > timeout:
                 logger.error(f"Timeout reached. Namespace '{namespace_name}' is still present.")
@@ -48,6 +41,12 @@ def delete_namespace(namespace_name, timeout=300, interval=5):
             
             logger.info(f"Waiting for namespace '{namespace_name}' to be deleted...")
             time.sleep(interval)
+            
+            namespaces = v1.list_namespace()
+            namespace_names = {ns.metadata.name for ns in namespaces.items}
+        
+        if namespace_name not in namespace_names:
+            logger.info(f"Namespace '{namespace_name}' has been deleted.")
         
     except ApiException as e:
         # Log detailed error information
