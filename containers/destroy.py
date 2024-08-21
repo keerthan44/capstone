@@ -1,59 +1,58 @@
-import docker
-import sys
-from multiprocessing import Pool
+import logging
+import time
+from kubernetes import client, config
+from kubernetes.client.rest import ApiException
+import os
+from dotenv import load_dotenv
 
-# Initialize Docker client
-client = docker.from_env()
+load_dotenv()  # take environment variables from .env.
 
-def list_containers_in_network(network_name):
-    network = client.networks.get(network_name)
-    return network.attrs['Containers']
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-def stop_and_remove_container(container_id):
-    try:
-        container = client.containers.get(container_id)
-        print(f"Stopping container {container.name} ({container.id})...")
-        container.stop()
-        print(f"Removing container {container.name} ({container.id})...")
-        container.remove()
-    except docker.errors.NotFound:
-        print(f"Container {container_id} not found")
-
-def remove_network(network_name):
-    network = client.networks.get(network_name)
-    print(f"Removing network {network_name}...")
-    network.remove()
-
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python destroy.py <network_name>")
-        sys.exit(1)
-
-    network_name = sys.argv[1]
+def delete_namespace(namespace_name, timeout=300, interval=5):
+    # Load the kube config from default location
+    config.load_kube_config()
+    
+    # Create an instance of the CoreV1Api
+    v1 = client.CoreV1Api()
     
     try:
-        containers = list_containers_in_network(network_name)
-        container_ids = list(containers.keys())
+        # Check if the namespace exists
+        namespaces = v1.list_namespace()
+        namespace_names = {ns.metadata.name for ns in namespaces.items}
         
-        if not container_ids:
-            print(f"No containers found in network {network_name}.")
-        else:
-            # Use Pool to manage multiple processes
-            with Pool(processes=len(container_ids)) as pool:
-                pool.map(stop_and_remove_container, container_ids)
+        if namespace_name not in namespace_names:
+            logger.warning(f"Namespace '{namespace_name}' does not exist.")
+            return
         
-        confirm = input(f"Do you want to remove the Docker network '{network_name}' as well? (yes/no): ").strip().lower()
+        # Attempt to delete the namespace
+        logger.info(f"Attempting to delete namespace '{namespace_name}'")
+        v1.delete_namespace(name=namespace_name)
         
-        if confirm == 'yes':
-            remove_network(network_name)
-            print(f"Network {network_name} removed.")
-        else:
-            print(f"Network {network_name} not removed.")
-    
-    except docker.errors.NotFound:
-        print(f"Network {network_name} not found.")
-    except Exception as e:
-        print(f"An error occurred: {e}")
+        # Wait until the namespace is deleted
+        start_time = time.time()
+        while namespace_name in namespace_names:
+            elapsed_time = time.time() - start_time
+            if elapsed_time > timeout:
+                logger.error(f"Timeout reached. Namespace '{namespace_name}' is still present.")
+                break
+            
+            logger.info(f"Waiting for namespace '{namespace_name}' to be deleted...")
+            time.sleep(interval)
+            
+            namespaces = v1.list_namespace()
+            namespace_names = {ns.metadata.name for ns in namespaces.items}
+        
+        if namespace_name not in namespace_names:
+            logger.info(f"Namespace '{namespace_name}' has been deleted.")
+        
+    except ApiException as e:
+        # Log detailed error information
+        logger.error(f"An error occurred: {e}")
+        logger.error(f"HTTP response headers: {e.headers}")
+        logger.error(f"HTTP response body: {e.body}")
 
 if __name__ == "__main__":
-    main()
+    delete_namespace(os.getenv("KUBERNETES_NAMESPACE", 'static-application'))
