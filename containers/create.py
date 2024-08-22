@@ -34,7 +34,6 @@ def wait_for_pods_ready(namespace):
         time.sleep(1)
 
 def port_forward_and_update_time(namespace, service_name, local_port=6379, remote_port=6379):
-
     # Start port forwarding in a subprocess
     process = subprocess.Popen([
         'kubectl', 'port-forward', f'service/{service_name}', f'{local_port}:{remote_port}', '-n', namespace
@@ -49,8 +48,7 @@ def port_forward_and_update_time(namespace, service_name, local_port=6379, remot
     
     # Example operation: Get a value from Redis
     try:
-        r.set('start_time', time.time_ns())  # Store time in miliseconds
-
+        r.set('start_time', time.time_ns())  # Store time in milliseconds
         print("Redis Start Time value is now set at", r.get('start_time'))
         print("Containers will start communicating")
     except Exception as e:
@@ -62,10 +60,14 @@ def port_forward_and_update_time(namespace, service_name, local_port=6379, remot
 # Function to read container names from a file
 def read_container_names(file_path):
     with open(file_path, 'r') as file:
-        return [line.strip() for line in file.readlines()]
+        containers_data = json.load(file)
+        return {entry['msName']: entry['replicas'] for entry in containers_data}
 
-def get_and_rename_containers(containersFile="containers.txt", callsFile="calls.json"):
-    mappedContainersFile = "".join(containersFile.split(".")[0]) + "_mapped.json"
+def get_and_rename_containers(containersFile="containers_fake.json", callsFile="calls.json"):
+    mappedContainersFile = containersFile.split(".")[0] + "_mapped.json"
+    
+    # Load the original containers to maintain replica counts
+    containers = read_container_names(containersFile)
     
     # Check if the mapped containers file already exists
     if os.path.isfile(mappedContainersFile):
@@ -92,11 +94,10 @@ def get_and_rename_containers(containersFile="containers.txt", callsFile="calls.
         # Write the renamed calls to a new mapped file
         with open(callsFile.split(".")[0] + "_mapped.json", "w") as f:
             json.dump(calls, f, indent=4)
-        return renamed_containers.values(), calls
+        return containers, renamed_containers, calls  # Return containers, renamed_containers, and calls
     
     # If mapped containers file doesn't exist, proceed with renaming
-    containers = read_container_names(containersFile)
-    renamed_containers = {container: f"s{i}" for i, container in enumerate(containers, 1)}
+    renamed_containers = {container: f"s{i}" for i, container in enumerate(containers.keys(), 1)}
     
     with open(callsFile) as f:
         calls = json.load(f)
@@ -115,17 +116,19 @@ def get_and_rename_containers(containersFile="containers.txt", callsFile="calls.
         else:
             print(f"Warning: {um} not found in renamed_containers. Skipping.")
     
-    # Write the renamed containers to a mapped file
-    with open(mappedContainersFile, "w") as f:
-        json.dump(renamed_containers, f, indent=4)
-    
     # Write the renamed calls to a new mapped file
     with open(callsFile.split(".")[0] + "_mapped.json", "w") as f:
         json.dump(calls, f, indent=4)
     
-    return renamed_containers.values(), calls
+    # Save the renamed containers to a file for future reference
+    with open(mappedContainersFile, 'w') as f:
+        json.dump(renamed_containers, f, indent=4)
+
+    return containers, renamed_containers, calls  # Return containers, renamed_containers, and calls
 
 def addContainerJob(container_names):
+    # container_names is a dictionary, so we need to work with its keys
+    container_names_list = list(container_names.keys())  # Convert dict keys to a list
     while True:
         print("Menu: ")
         print("1. All Containers are sleeping")
@@ -134,9 +137,9 @@ def addContainerJob(container_names):
         option = input("Enter your choice (1/2/3): ").strip()
         match option:
             case '1': 
-                return [[container_name, 0] for container_name in container_names]
+                return [[container_name, 0] for container_name in container_names_list]
             case '2': 
-                return [[container_name, 1] for container_name in container_names]
+                return [[container_name, 1] for container_name in container_names_list]
             case '3':
                 print("You can enter the containers that are working in ranges like 1-5, 7-10")
                 print("1-1(includes both 1 and 1), 1-4(includes 1, 2, 3, 4)")
@@ -145,13 +148,13 @@ def addContainerJob(container_names):
                 for i in range(len(containersWorking)):
                     start, end = containersWorking[i].split("-")
                     containersWorking[i] = [int(start), int(end)]
-                n = len(container_names) 
-                container_names = [[container_name, 0] for container_name in container_names]
+                n = len(container_names_list) 
+                container_jobs = [[container_name, 0] for container_name in container_names_list]
                 for start, end in containersWorking:
                     for index in range(start, end + 1):
-                        if index < n:
-                            container_names[index][1] = 1
-                return container_names
+                        if index - 1 < n:  # Adjust index to match the list index
+                            container_jobs[index - 1][1] = 1  # Subtract 1 to get the correct list index
+                return container_jobs
             case _:
                 print("Invalid choice. Please try again.")
 
@@ -226,7 +229,8 @@ def create_logging_deployment(namespace, redis_ip):
     apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
     print(f"Logging Deployment created in namespace '{namespace}'.")
 
-def create_container_deployment(namespace, container_name, config_map_name, redis_ip, container_job):
+def create_container_deployment(namespace, container_name, config_map_name, redis_ip, container_job, replicas):
+    # Container with the job
     container = V1Container(
         name=container_name,
         image=f"flask-contact-container",
@@ -237,21 +241,26 @@ def create_container_deployment(namespace, container_name, config_map_name, redi
             client.V1EnvVar(name="NAMESPACE", value=namespace)
         ],
         volume_mounts=[client.V1VolumeMount(mount_path="/app/calls.json", sub_path="data", name="config-volume")],
-        image_pull_policy="Never"  # Set the image pull policy to Never
+        image_pull_policy="Never"
     )
     
+    # Config volume for the container
     volume = client.V1Volume(
         name="config-volume",
         config_map=client.V1ConfigMapVolumeSource(name=config_map_name)
     )
 
+    # Pod specification
     pod_spec = V1PodSpec(containers=[container], volumes=[volume])
     template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": container_name}), spec=pod_spec)
-    spec = V1DeploymentSpec(replicas=1, template=template, selector=V1LabelSelector(match_labels={"app": container_name}))
+
+    # Deployment with the replica count from JSON
+    spec = V1DeploymentSpec(replicas=replicas, template=template, selector=V1LabelSelector(match_labels={"app": container_name}))
     deployment = V1Deployment(metadata=V1ObjectMeta(name=f"{container_name}-deployment", namespace=namespace), spec=spec)
     
+    # Create deployment in the namespace
     apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
-    print(f"Deployment '{container_name}' created in namespace '{namespace}'.")
+    print(f"Deployment '{container_name}' created in namespace '{namespace}' with {replicas} replicas.")
 
 def create_container_service(namespace, container_name, port_mappings):
     """
@@ -283,16 +292,15 @@ def create_container_service(namespace, container_name, port_mappings):
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Service '{container_name}-service' created in namespace '{namespace}' with ports: {port_mappings}.")
 
-
 def main():
     namespace = os.getenv("KUBERNETES_NAMESPACE", "static-application")
-    container_names_file = "containers.txt"
+    container_names_file = "containers_fake.json"
     
     # Ensure the namespace exists
     get_or_create_namespace(namespace)
 
-    # Read container names from file and get renamed containers
-    container_names, calls = get_and_rename_containers()
+    # Read container names and replicas from file and get renamed containers
+    containers, renamed_containers, calls = get_and_rename_containers()
 
     # Create Redis deployment and service
     create_redis_deployment(namespace)
@@ -304,20 +312,24 @@ def main():
     create_logging_service(namespace)
 
     # Create ConfigMap for each container's calls.json
-    for container_name in container_names:
+    for container_name in renamed_containers.values():
         create_config_map(namespace, f"{container_name}-config", data=json.dumps(calls.get(container_name, {})))
 
-    # Create deployments for containers
-    container_jobs = addContainerJob(container_names)
-    for container_name, container_job in container_jobs:
-        create_container_deployment(namespace, container_name, f"{container_name}-config", redis_ip="redis-service", container_job=container_job)
-    for container_name in container_names:
-        create_container_service(namespace, container_name, [{ "port": 80, "target_port": 80 }])
+    # Create deployments for containers with replicas from JSON
+    container_jobs = addContainerJob(containers)
+    for original_container_name, container_job in container_jobs:
+        service_name = renamed_containers[original_container_name]  # Get the service name (s1, s2, etc.)
+        replicas = int(containers[original_container_name])  # Get replica count from the original containers dictionary
+        create_container_deployment(namespace, service_name, f"{service_name}-config", redis_ip="redis-service", container_job=container_job, replicas=replicas)
+    
+    # Create services for each container
+    for original_container_name in containers:
+        service_name = renamed_containers[original_container_name]  # Get the service name (s1, s2, etc.)
+        create_container_service(namespace, service_name, [{"port": 80, "target_port": 80}])
 
     print("All deployments and services are up and running in Kubernetes.")
     wait_for_pods_ready(namespace)
     port_forward_and_update_time(namespace, "redis-service", 60892, 6379)
-
 
 if __name__ == "__main__":
     main()
