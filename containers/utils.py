@@ -3,19 +3,47 @@ from kubernetes import client, config
 import signal
 import os
 import subprocess
+from kubernetes.client.rest import ApiException
 
 def wait_for_pods_ready(namespace):
-    # Load kube config and create a client
     config.load_kube_config()
     v1 = client.CoreV1Api()
+    apps_v1 = client.AppsV1Api()
+
+    def are_all_pods_ready(pods):
+        return all(pod.status.phase == 'Running' for pod in pods)
+
+    def are_all_deployments_ready():
+        try:
+            deployments = apps_v1.list_namespaced_deployment(namespace)
+            for deployment in deployments.items:
+                if deployment.status.replicas != deployment.status.ready_replicas:
+                    return False
+            return True
+        except ApiException as e:
+            print(f"Exception when listing deployments: {e}")
+            return False
+
+    def are_all_statefulsets_ready():
+        try:
+            statefulsets = apps_v1.list_namespaced_stateful_set(namespace)
+            for statefulset in statefulsets.items:
+                if statefulset.status.replicas != statefulset.status.ready_replicas:
+                    return False
+            return True
+        except ApiException as e:
+            print(f"Exception when listing statefulsets: {e}")
+            return False
 
     while True:
+        # Check if all pods are running
         pods = v1.list_namespaced_pod(namespace)
-        if all(pod.status.phase == 'Running' for pod in pods.items):
-            print("All pods are running.")
+        if are_all_pods_ready(pods.items) and are_all_deployments_ready() and are_all_statefulsets_ready():
+            print("All pods, deployments, and statefulsets are ready.")
             break
-        print("Waiting for pods to be ready...")
-        time.sleep(1)
+        
+        print("Waiting for all pods, deployments, and statefulsets to be ready...")
+        time.sleep(3)
 
 def wait_for_service_ready(service_name, namespace):
     # Load kube config and create a client

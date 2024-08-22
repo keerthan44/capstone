@@ -3,12 +3,8 @@ from kubernetes.client import V1Service, V1ObjectMeta, V1ServiceSpec, V1ServiceP
 from kubernetes.client.rest import ApiException
 
 
-# Load Kubernetes configuration
-config.load_kube_config()
-v1 = client.CoreV1Api()
-apps_v1 = client.AppsV1Api()
 
-def create_zookeeper_service(namespace):
+def create_zookeeper_service(v1, namespace):
     service = V1Service(
         metadata=V1ObjectMeta(name="zoo1", namespace=namespace, labels={"service": "zoo1-instance"}),
         spec=V1ServiceSpec(
@@ -19,7 +15,7 @@ def create_zookeeper_service(namespace):
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Zookeeper Service created in namespace '{namespace}'.")
 
-def create_zookeeper_statefulset(namespace):
+def create_zookeeper_statefulset(apps_v1, namespace):
     container = V1Container(
         name="zoo1-instance",
         image="wurstmeister/zookeeper",
@@ -42,7 +38,7 @@ def create_zookeeper_statefulset(namespace):
     apps_v1.create_namespaced_stateful_set(namespace=namespace, body=statefulset)
     print(f"Zookeeper StatefulSet created in namespace '{namespace}'.")
 
-def create_kafka_service(namespace):
+def create_kafka_service(v1, namespace):
     service = V1Service(
         metadata=V1ObjectMeta(name="kafka", namespace=namespace, labels={"service": "kafka-instance"}),
         spec=V1ServiceSpec(
@@ -58,7 +54,7 @@ def create_kafka_service(namespace):
     print(f"Headless Kafka Service created in namespace '{namespace}'.")
 
 
-def create_kafka_statefulset(namespace):
+def create_kafka_statefulset(apps_v1, namespace):
     # Ask the user for the number of replicas
     replicas = int(input("Enter the number of Kafka replicas: "))
 
@@ -102,7 +98,7 @@ def create_kafka_statefulset(namespace):
     print(f"Kafka StatefulSet with {replicas} replica(s) created in namespace '{namespace}'.")
 
 
-def create_kafka_external_gateway_deployment(namespace):
+def create_kafka_external_gateway_deployment(apps_v1, namespace):
     replicas = int(input("Enter the number of Kafka External Gateway replicas: "))
     """Create a Kubernetes Deployment."""
     container = client.V1Container(
@@ -136,7 +132,7 @@ def create_kafka_external_gateway_deployment(namespace):
     except ApiException as e:
         print(f"Exception when creating Deployment: {e}")
 
-def create_kafka_external_gateway_service(namespace):
+def create_kafka_external_gateway_service(v1, namespace):
     """Create a Kubernetes Service with LoadBalancer type."""
     service_spec = client.V1ServiceSpec(
         selector={"app": "kafka-external-gateway"},
@@ -153,13 +149,13 @@ def create_kafka_external_gateway_service(namespace):
     except ApiException as e:
         print(f"Exception when creating Service: {e}")
     
-def create_or_update_kafka_external_gateway_role_and_rolebinding(namespace):
+def create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namespace):
     """Create or update a Kubernetes Role and RoleBinding for managing Kafka External Gateway resources."""
-    # Load kube config
-    config.load_kube_config()
+    # # Load kube config
+    # config.load_kube_config()
 
-    # Create RBAC API client
-    rbac_v1 = client.RbacAuthorizationV1Api()
+    # # Create RBAC API client
+    # rbac_v1 = client.RbacAuthorizationV1Api()
 
     # Define the Role
     role = client.V1Role(
@@ -219,37 +215,40 @@ def create_or_update_kafka_external_gateway_role_and_rolebinding(namespace):
             print(f"Exception when creating or updating RoleBinding: {e}")
             raise
 
-def deploy_kafka_environment(namespace):
+def deploy_kafka_environment(namespace, v1, apps_v1, rbac_v1):
     # Deploy Zookeeper
-    create_zookeeper_service(namespace)
-    create_zookeeper_statefulset(namespace)
+    create_zookeeper_service(v1, namespace)
+    create_zookeeper_statefulset(apps_v1, namespace)
 
     # Deploy Kafka
-    create_kafka_service(namespace)
-    create_kafka_statefulset(namespace)
+    create_kafka_service(v1, namespace)
+    create_kafka_statefulset(apps_v1, namespace)
 
     # Deploy Kafka External Gateway
-    create_or_update_kafka_external_gateway_role_and_rolebinding(namespace)
-    create_kafka_external_gateway_deployment(namespace)
-    create_kafka_external_gateway_service(namespace)
+    create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namespace)
+    create_kafka_external_gateway_service(v1, namespace)
+    create_kafka_external_gateway_deployment(apps_v1, namespace)
 
 
 def main():
+# Load Kubernetes configuration
+    config.load_kube_config()
+    v1 = client.CoreV1Api()
+    apps_v1 = client.AppsV1Api()
+    rbac_v1 = client.RbacAuthorizationV1Api()
     namespace = "static-application"  # Replace with your namespace
 
-    # Deploy Zookeeper
-    create_zookeeper_service(namespace)
-    create_zookeeper_statefulset(namespace)
+    create_zookeeper_service(v1, namespace)
+    create_zookeeper_statefulset(apps_v1, namespace)
 
     # Deploy Kafka
-    create_kafka_service(namespace)
-    create_kafka_statefulset(namespace)
+    create_kafka_service(v1, namespace)
+    create_kafka_statefulset(apps_v1, namespace)
 
     # Deploy Kafka External Gateway
-    create_or_update_kafka_external_gateway_role_and_rolebinding(namespace)
-    create_kafka_external_gateway_deployment(namespace)
-    create_kafka_external_gateway_service(namespace)
-    # create_kafka_topic("192.168.49.2:32092", ["test-topic"])
+    create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namespace)
+    create_kafka_external_gateway_service(v1, namespace)
+    create_kafka_external_gateway_deployment(apps_v1, namespace)
 
 if __name__ == "__main__":
     main()

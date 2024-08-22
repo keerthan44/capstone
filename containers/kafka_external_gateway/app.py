@@ -9,7 +9,7 @@ import sys
 
 app = Flask(__name__)
 
-def get_kafka_brokers(namespace, kafka_statefulset_name):
+def get_kafka_brokers(namespace, kafka_statefulset_name, kafka_service_name='kafka'):
     """Retrieve Kafka broker addresses from the pods of a StatefulSet using the Kubernetes client library."""
     try:
         # Load the Kubernetes configuration
@@ -41,7 +41,7 @@ def get_kafka_brokers(namespace, kafka_statefulset_name):
             for container in pod.spec.containers:
                 for port in container.ports:
                     # Use the pod's DNS name within the cluster
-                    brokers.add(f"{pod.metadata.name}.kafka.{namespace}.svc.cluster.local:9092")
+                    brokers.add(f"{pod.metadata.name}.{kafka_service_name}.{namespace}.svc.cluster.local:9092")
         
         if brokers:
             print(f"Kafka Brokers retrieved: {', '.join(brokers)}", file=sys.stderr)
@@ -114,11 +114,12 @@ def create_topics():
     data = request.json
     topics = data.get('topics', [])
     namespace = data.get('namespace', 'default')
-    kafka_statefulset_name = data.get('kafka_statefulset_name', 'kafka')
+    kafka_statefulset_name = data.get('kafka_statefulset_name', 'kafka-instance')
+    kafka_service_name = data.get('kafka_service_name', 'kafka')
     timeout = data.get('timeout', 60)
     poll_interval = data.get('poll_interval', 5)
 
-    brokers = get_kafka_brokers(namespace, kafka_statefulset_name)
+    brokers = get_kafka_brokers(namespace, kafka_statefulset_name, kafka_service_name)
     broker = get_random_broker(brokers)
 
     if not topics:
@@ -143,9 +144,10 @@ def send_messages():
     data = request.json
     messages = data.get('messages', [])
     namespace = data.get('namespace', 'default')
-    kafka_statefulset_name = data.get('kafka_statefulset_name', 'kafka')
+    kafka_statefulset_name = data.get('kafka_statefulset_name', 'kafka-instance')
+    kafka_service_name = data.get('kafka_service_name', 'kafka')
 
-    brokers = get_kafka_brokers(namespace, kafka_statefulset_name)
+    brokers = get_kafka_brokers(namespace, kafka_statefulset_name, kafka_service_name)
     broker = get_random_broker(brokers)
     
     if broker is None:

@@ -2,7 +2,7 @@ import os
 import json
 from kubernetes import client, config
 from kubernetes.client import V1Pod, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1Deployment, V1DeploymentSpec, V1PodTemplateSpec, V1LabelSelector, V1Ingress, V1IngressSpec, V1IngressRule, V1IngressBackend
-# from kafka_setup import create_kafka_topic, deploy_kafka_and_zookeeper
+from kafka_setup import create_kafka_topic, deploy_kafka_environment
 from utils import wait_for_pods_ready, port_forward_and_exec_func, wait_for_service_ready, get_or_create_namespace   
 
 from dotenv import load_dotenv
@@ -10,12 +10,6 @@ from redis_setup import set_start_time_redis, create_redis_deployment, create_re
 
 load_dotenv()  # take environment variables from .env.
 
-# Load the Kubernetes configuration
-config.load_kube_config()
-
-# Kubernetes API client
-v1 = client.CoreV1Api()
-apps_v1 = client.AppsV1Api()
 
 dockerUsername = os.getenv("DOCKER_USERNAME")
 
@@ -117,7 +111,7 @@ def addContainerJob(container_names):
             case _:
                 print("Invalid choice. Please try again.")
 
-def create_config_map(namespace, config_name, data):
+def create_config_map(v1, namespace, config_name, data):
     config_map = client.V1ConfigMap(
         metadata=client.V1ObjectMeta(name=config_name, namespace=namespace),
         data={"data": data}
@@ -127,7 +121,7 @@ def create_config_map(namespace, config_name, data):
 
 
 
-def create_logging_service(namespace):
+def create_logging_service(v1, namespace):
     service = V1Service(
         metadata=V1ObjectMeta(name="logging-service", namespace=namespace),
         spec=V1ServiceSpec(
@@ -138,7 +132,7 @@ def create_logging_service(namespace):
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Logging Service created in namespace '{namespace}'.")
 
-def create_logging_deployment(namespace, redis_ip):
+def create_logging_deployment(apps_v1, namespace, redis_ip):
     container = V1Container(
         name="logging-container",
         image=f"logging_capstone",
@@ -154,7 +148,7 @@ def create_logging_deployment(namespace, redis_ip):
     apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
     print(f"Logging Deployment created in namespace '{namespace}'.")
 
-def create_container_deployment(namespace, container_name, config_map_name, redis_ip, container_job):
+def create_container_deployment(apps_v1, namespace, container_name, config_map_name, redis_ip, container_job):
     container = V1Container(
         name=container_name,
         image=f"flask-contact-container",
@@ -181,7 +175,7 @@ def create_container_deployment(namespace, container_name, config_map_name, redi
     apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
     print(f"Deployment '{container_name}' created in namespace '{namespace}'.")
 
-def create_container_service(namespace, container_name, port_mappings):
+def create_container_service(v1, namespace, container_name, port_mappings):
     """
     Create a Kubernetes service with multiple port mappings.
     
@@ -213,13 +207,20 @@ def create_container_service(namespace, container_name, port_mappings):
 def main():
     namespace = os.getenv("KUBERNETES_NAMESPACE", "static-application")
     container_names_file = "containers.txt"
+    # Load the Kubernetes configuration
+    config.load_kube_config()
+
+    # Kubernetes API client
+    v1 = client.CoreV1Api()
+    apps_v1 = client.AppsV1Api()
+    rbac_v1 = client.RbacAuthorizationV1Api()
 
     
     # # Ensure the namespace exists
     get_or_create_namespace(namespace)
 
     # Setup Kafka environment
-    # deploy_kafka_and_zookeeper(namespace)
+    deploy_kafka_environment(v1, apps_v1, rbac_v1, namespace)
 
     # Read container names from file and get renamed containers
     # container_names, calls = get_and_rename_containers()

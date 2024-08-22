@@ -3,13 +3,6 @@ import time
 from kubernetes import client, config
 from kubernetes.client import  V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1Deployment, V1DeploymentSpec, V1PodTemplateSpec, V1LabelSelector
 
-# Load the Kubernetes configuration
-config.load_kube_config()
-
-# Kubernetes API client
-v1 = client.CoreV1Api()
-apps_v1 = client.AppsV1Api()
-
 def set_start_time_redis(data):
     r = redis.Redis(host='localhost', port=data['local_port'])
     print("Connected to Redis.")
@@ -23,7 +16,7 @@ def set_start_time_redis(data):
     except Exception as e:
         print(f"Error: {e}")
 
-def create_redis_service(namespace):
+def create_redis_service(v1, namespace):
     service = V1Service(
         metadata=V1ObjectMeta(name="redis-service", namespace=namespace),
         spec=V1ServiceSpec(
@@ -34,7 +27,7 @@ def create_redis_service(namespace):
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Redis Service created in namespace '{namespace}'.")
 
-def create_redis_deployment(namespace):
+def create_redis_deployment(apps_v1, namespace):
     container = V1Container(
         name="redis",
         image="redis:latest",
@@ -47,3 +40,22 @@ def create_redis_deployment(namespace):
     
     apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
     print(f"Redis Deployment created in namespace '{namespace}'.")
+
+def deploy_redis_environment(namespace, v1, apps_v1):
+    #Deploy Redis
+    create_redis_service(v1, namespace)
+    create_redis_deployment(apps_v1, namespace)
+
+def main():
+    config.load_kube_config()
+    v1 = client.CoreV1Api()
+    apps_v1 = client.AppsV1Api()
+    namespace = "default"
+
+    deploy_redis_environment(namespace, v1, apps_v1)
+    set_start_time_redis({'local_port': 6379})
+    print("Redis setup is complete.")
+    
+
+if __name__ == "main":
+    main()
