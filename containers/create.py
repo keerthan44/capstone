@@ -2,7 +2,7 @@ import os
 import json
 from kubernetes import client, config
 from kubernetes.client import V1Pod, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1Deployment, V1DeploymentSpec, V1PodTemplateSpec, V1LabelSelector, V1Ingress, V1IngressSpec, V1IngressRule, V1IngressBackend
-from kafka_setup import create_kafka_topic, deploy_kafka_and_zookeeper
+# from kafka_setup import create_kafka_topic, deploy_kafka_and_zookeeper
 from utils import wait_for_pods_ready, port_forward_and_exec_func, wait_for_service_ready   
 
 from dotenv import load_dotenv
@@ -233,14 +233,14 @@ def main():
     # deploy_kafka_and_zookeeper(namespace)
 
     # Read container names from file and get renamed containers
-    container_names, calls = get_and_rename_containers()
+    # container_names, calls = get_and_rename_containers()
 
     # # Create Redis deployment and service
     # create_redis_deployment(namespace)
     # create_redis_service(namespace)
     # wait_for_pods_ready(namespace)
 
-    port_forward_and_exec_func(namespace, "kafka-service", 9092, 30092, funcToExec=create_kafka_topic, data={"topic_names": container_names, 'namespace': namespace})
+    # port_forward_and_exec_func(namespace, "kafka-service", 9092, 30092, funcToExec=create_kafka_topic, data={"topic_names": container_names, 'namespace': namespace})
     # create_kafka_topic({"topic_names": container_names, "local_port": 30992, 'namespace': namespace})
     
     # # Create Logging deployment and service
