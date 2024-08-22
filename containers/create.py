@@ -3,7 +3,7 @@ import json
 from kubernetes import client, config
 from kubernetes.client import V1Pod, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1Deployment, V1DeploymentSpec, V1PodTemplateSpec, V1LabelSelector, V1Ingress, V1IngressSpec, V1IngressRule, V1IngressBackend
 # from kafka_setup import create_kafka_topic, deploy_kafka_and_zookeeper
-from utils import wait_for_pods_ready, port_forward_and_exec_func, wait_for_service_ready   
+from utils import wait_for_pods_ready, port_forward_and_exec_func, wait_for_service_ready, get_or_create_namespace   
 
 from dotenv import load_dotenv
 from redis_setup import set_start_time_redis, create_redis_deployment, create_redis_service
@@ -117,17 +117,6 @@ def addContainerJob(container_names):
             case _:
                 print("Invalid choice. Please try again.")
 
-def get_or_create_namespace(namespace_name):
-    try:
-        v1.read_namespace(name=namespace_name)
-        print(f"Namespace '{namespace_name}' already exists.")
-    except client.exceptions.ApiException as e:
-        if e.status == 404:
-            v1.create_namespace(client.V1Namespace(metadata=client.V1ObjectMeta(name=namespace_name)))
-            print(f"Namespace '{namespace_name}' created.")
-        else:
-            raise
-
 def create_config_map(namespace, config_name, data):
     config_map = client.V1ConfigMap(
         metadata=client.V1ObjectMeta(name=config_name, namespace=namespace),
@@ -155,7 +144,7 @@ def create_logging_deployment(namespace, redis_ip):
         image=f"logging_capstone",
         env=[client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip)],
         ports=[client.V1ContainerPort(container_port=80)],
-        image_pull_policy="Never"  # Set the image pull policy to Never
+        image_pull_policy="IfNotPresent"  # Set the image pull policy to IfNotPresent
     )
     pod_spec = V1PodSpec(containers=[container])
     template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": "logging"}), spec=pod_spec)
@@ -176,7 +165,7 @@ def create_container_deployment(namespace, container_name, config_map_name, redi
             client.V1EnvVar(name="NAMESPACE", value=namespace)
         ],
         volume_mounts=[client.V1VolumeMount(mount_path="/app/calls.json", sub_path="data", name="config-volume")],
-        image_pull_policy="Never"  # Set the image pull policy to Never
+        image_pull_policy="IfNotPresent"  # Set the image pull policy to IfNotPresent
     )
     
     volume = client.V1Volume(

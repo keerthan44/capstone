@@ -1,5 +1,7 @@
 from kubernetes import client, config
 from kubernetes.client import V1Service, V1ObjectMeta, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1PodSpec, V1Container, V1ContainerPort, V1PersistentVolumeClaim, V1EnvVar
+from kubernetes.client.rest import ApiException
+
 
 # Load Kubernetes configuration
 config.load_kube_config()
@@ -46,32 +48,33 @@ def create_kafka_service(namespace):
         spec=V1ServiceSpec(
             ports=[
                 V1ServicePort(name="9092", port=9092, target_port=9092),
-                V1ServicePort(name="9093", port=9093, target_port=9093),
-                V1ServicePort(name="32092", port=32092, target_port=32092, node_port=32092)
+                V1ServicePort(name="9093", port=9093, target_port=9093)
             ],
             selector={"service": "kafka-instance"},
-            type="NodePort"
+            cluster_ip="None"  # Makes the service headless
         )
     )
     v1.create_namespaced_service(namespace=namespace, body=service)
-    print(f"Kafka Service created in namespace '{namespace}'.")
+    print(f"Headless Kafka Service created in namespace '{namespace}'.")
+
 
 def create_kafka_statefulset(namespace):
+    # Ask the user for the number of replicas
+    replicas = int(input("Enter the number of Kafka replicas: "))
+
     container = V1Container(
         name="kafka-instance",
         image="wurstmeister/kafka",
         ports=[
             V1ContainerPort(container_port=9092),
-            V1ContainerPort(container_port=9093),
-            V1ContainerPort(container_port=32092)
+            V1ContainerPort(container_port=9093)
         ],
         env=[
-            V1EnvVar(name="MY_HOST_IP", value_from=client.V1EnvVarSource(field_ref=client.V1ObjectFieldSelector(field_path="status.hostIP"))),
             V1EnvVar(name="MY_POD_NAME", value_from=client.V1EnvVarSource(field_ref=client.V1ObjectFieldSelector(field_path="metadata.name"))),
-            V1EnvVar(name="KAFKA_ADVERTISED_LISTENERS", value=f"INTERNAL://$(MY_POD_NAME).kafka.{namespace}.svc.cluster.local:9093,CLIENT://$(MY_POD_NAME).kafka.default.svc.cluster.local:9092,EXTERNAL://$(MY_HOST_IP):32092"),
+            V1EnvVar(name="KAFKA_ADVERTISED_LISTENERS", value=f"INTERNAL://$(MY_POD_NAME).kafka.{namespace}.svc.cluster.local:9093,CLIENT://$(MY_POD_NAME).kafka.{namespace}.svc.cluster.local:9092"),
             V1EnvVar(name="KAFKA_INTER_BROKER_LISTENER_NAME", value="INTERNAL"),
-            V1EnvVar(name="KAFKA_LISTENERS", value="INTERNAL://:9093,CLIENT://:9092,EXTERNAL://:32092"),
-            V1EnvVar(name="KAFKA_LISTENER_SECURITY_PROTOCOL_MAP", value="INTERNAL:PLAINTEXT,CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT"),
+            V1EnvVar(name="KAFKA_LISTENERS", value="INTERNAL://:9093,CLIENT://:9092"),
+            V1EnvVar(name="KAFKA_LISTENER_SECURITY_PROTOCOL_MAP", value="INTERNAL:PLAINTEXT,CLIENT:PLAINTEXT"),
             V1EnvVar(name="KAFKA_PORT", value="9092"),
             V1EnvVar(name="KAFKA_RESTART_ATTEMPTS", value="10"),
             V1EnvVar(name="KAFKA_RESTART_DELAY", value="5"),
@@ -84,7 +87,7 @@ def create_kafka_statefulset(namespace):
         metadata=V1ObjectMeta(name="kafka-instance", namespace=namespace, labels={"service": "kafka-instance"}),
         spec=V1StatefulSetSpec(
             service_name="kafka",
-            replicas=1,
+            replicas=replicas,
             selector=client.V1LabelSelector(match_labels={"service": "kafka-instance"}),
             template=V1PodTemplateSpec(
                 metadata=V1ObjectMeta(labels={"service": "kafka-instance"}),
@@ -94,80 +97,159 @@ def create_kafka_statefulset(namespace):
             )
         )
     )
-    apps_v1.create_namespaced_stateful_set(namespace=namespace, body=statefulset)
-    print(f"Kafka StatefulSet created in namespace '{namespace}'.")
-
-from kubernetes import client, config
-from kubernetes.client import V1Service, V1ObjectMeta, V1ServiceSpec, V1ServicePort
-from confluent_kafka.admin import AdminClient as KafkaAdminClient, NewTopic
-import time
-
-# Load Kubernetes configuration
-config.load_kube_config()
-v1 = client.CoreV1Api()
-
-def create_kafka_topic(broker, topic_names, num_partitions=1, replication_factor=1, timeout=60, poll_interval=5):
-    # Initialize Kafka Admin Client
-    admin_client = KafkaAdminClient(
-        {"bootstrap.servers": broker}
-    )
-
-    # Define topics to create
-    new_topics = [NewTopic(
-        topic=topic_name,
-        num_partitions=num_partitions,
-        replication_factor=replication_factor
-    ) for topic_name in topic_names]
-
-    # Create Topics
-    try:
-        admin_client.create_topics(new_topics, validate_only=False)
-        print(f"Kafka Topics creation initiated for: {', '.join(topic_names)}")
-    except Exception as e:
-        print(f"Error creating Kafka topics: {e}")
-        return
-
-    # Wait for Topics to be created
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        try:
-            # Fetch existing topics
-            cluster_metadata = admin_client.list_topics(timeout=10)
-            existing_topics = cluster_metadata.topics.keys()  # Get the keys (topic names)
-
-            # Check for missing topics
-            missing_topics = [t for t in topic_names if t not in existing_topics]
-
-            if not missing_topics:
-                print(f"Kafka Topics created: {', '.join(topic_names)}")
-                return
-
-            print(f"Waiting for topics to be created: {', '.join(missing_topics)}")
-        except Exception as e:
-            print(f"Error while checking topics: {e}")
-
-        time.sleep(poll_interval)
-
-    # Timeout reached
-    cluster_metadata = admin_client.list_topics(timeout=10)
-    existing_topics = cluster_metadata.topics.keys()
-    missing_topics = [t for t in topic_names if t not in existing_topics]
     
-    if missing_topics:
-        print(f"Timeout reached. Topics not found: {', '.join(missing_topics)}")
+    apps_v1.create_namespaced_stateful_set(namespace=namespace, body=statefulset)
+    print(f"Kafka StatefulSet with {replicas} replica(s) created in namespace '{namespace}'.")
+
+
+def create_kafka_external_gateway_deployment(namespace):
+    replicas = int(input("Enter the number of Kafka External Gateway replicas: "))
+    """Create a Kubernetes Deployment."""
+    container = client.V1Container(
+        name="kafka-external-gateway",
+        image='kafka-external-gateway:latest',
+        ports=[client.V1ContainerPort(container_port=8080)],
+        env=[
+            client.V1EnvVar(name="KAFKA_BROKER", value="localhost:9092")
+        ],
+        image_pull_policy="IfNotPresent",  # Set the image pull policy to IfNotPresent
+    )
+    spec = client.V1PodSpec(
+        containers=[container]
+    )
+    template = client.V1PodTemplateSpec(
+        metadata=client.V1ObjectMeta(labels={"app": "kafka-external-gateway"}),
+        spec=spec
+    )
+    deployment_spec = client.V1DeploymentSpec(
+        replicas=replicas,
+        selector=client.V1LabelSelector(match_labels={"app": "kafka-external-gateway"}),
+        template=template
+    )
+    deployment = client.V1Deployment(
+        metadata=client.V1ObjectMeta(name="kafka-external-gateway", namespace=namespace),
+        spec=deployment_spec
+    )
+    try:
+        apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
+        print(f"Deployment created in namespace '{namespace}'.")
+    except ApiException as e:
+        print(f"Exception when creating Deployment: {e}")
+
+def create_kafka_external_gateway_service(namespace):
+    """Create a Kubernetes Service with LoadBalancer type."""
+    service_spec = client.V1ServiceSpec(
+        selector={"app": "kafka-external-gateway"},
+        ports=[client.V1ServicePort(port=80, target_port=8080, node_port=32092)],
+        type="LoadBalancer"
+    )
+    service = client.V1Service(
+        metadata=client.V1ObjectMeta(name="kafka-external-gateway", namespace=namespace),
+        spec=service_spec
+    )
+    try:
+        v1.create_namespaced_service(namespace=namespace, body=service)
+        print(f"Service created in namespace '{namespace}'.")
+    except ApiException as e:
+        print(f"Exception when creating Service: {e}")
+    
+def create_or_update_kafka_external_gateway_role_and_rolebinding(namespace):
+    """Create or update a Kubernetes Role and RoleBinding for managing Kafka External Gateway resources."""
+    # Load kube config
+    config.load_kube_config()
+
+    # Create RBAC API client
+    rbac_v1 = client.RbacAuthorizationV1Api()
+
+    # Define the Role
+    role = client.V1Role(
+        metadata=client.V1ObjectMeta(name="kafka-external-gateway-manager", namespace=namespace),
+        rules=[
+            client.V1PolicyRule(
+                api_groups=["apps"],  # The api group for StatefulSets is "apps"
+                resources=["statefulsets"],
+                verbs=["create", "get", "list", "watch", "update", "delete"]
+            ),
+            client.V1PolicyRule(
+                api_groups=[""],  # The api group for Pods is ""
+                resources=["pods"],
+                verbs=["create", "get", "list", "watch", "update", "delete"]
+            )
+        ]
+    )
+    
+    # Define the RoleBinding
+    role_binding = client.V1RoleBinding(
+        metadata=client.V1ObjectMeta(name="kafka-external-gateway-manager-binding", namespace=namespace),
+        subjects=[
+            client.RbacV1Subject(
+                kind="ServiceAccount",
+                name="default",
+                namespace=namespace
+            )
+        ],
+        role_ref=client.V1RoleRef(
+            kind="Role",
+            name="kafka-external-gateway-manager",
+            api_group="rbac.authorization.k8s.io"
+        )
+    )
+    
+    # Try to update or create Role
+    try:
+        rbac_v1.replace_namespaced_role(name=role.metadata.name, namespace=namespace, body=role)
+        print(f"Role '{role.metadata.name}' updated in namespace '{namespace}'.")
+    except ApiException as e:
+        if e.status == 404:  # Not Found, create the role
+            rbac_v1.create_namespaced_role(namespace=namespace, body=role)
+            print(f"Role '{role.metadata.name}' created in namespace '{namespace}'.")
+        else:
+            print(f"Exception when creating or updating Role: {e}")
+            raise
+
+    # Try to update or create RoleBinding
+    try:
+        rbac_v1.replace_namespaced_role_binding(name=role_binding.metadata.name, namespace=namespace, body=role_binding)
+        print(f"RoleBinding '{role_binding.metadata.name}' updated in namespace '{namespace}'.")
+    except ApiException as e:
+        if e.status == 404:  # Not Found, create the role_binding
+            rbac_v1.create_namespaced_role_binding(namespace=namespace, body=role_binding)
+            print(f"RoleBinding '{role_binding.metadata.name}' created in namespace '{namespace}'.")
+        else:
+            print(f"Exception when creating or updating RoleBinding: {e}")
+            raise
+
+def deploy_kafka_environment(namespace):
+    # Deploy Zookeeper
+    create_zookeeper_service(namespace)
+    create_zookeeper_statefulset(namespace)
+
+    # Deploy Kafka
+    create_kafka_service(namespace)
+    create_kafka_statefulset(namespace)
+
+    # Deploy Kafka External Gateway
+    create_or_update_kafka_external_gateway_role_and_rolebinding(namespace)
+    create_kafka_external_gateway_deployment(namespace)
+    create_kafka_external_gateway_service(namespace)
 
 
 def main():
     namespace = "static-application"  # Replace with your namespace
 
-    # # Deploy Zookeeper
-    # create_zookeeper_service(namespace)
-    # create_zookeeper_statefulset(namespace)
+    # Deploy Zookeeper
+    create_zookeeper_service(namespace)
+    create_zookeeper_statefulset(namespace)
 
-    # # Deploy Kafka
-    # create_kafka_service(namespace)
-    # create_kafka_statefulset(namespace)
-    create_kafka_topic("192.168.49.2:32092", ["test-topic"])
+    # Deploy Kafka
+    create_kafka_service(namespace)
+    create_kafka_statefulset(namespace)
+
+    # Deploy Kafka External Gateway
+    create_or_update_kafka_external_gateway_role_and_rolebinding(namespace)
+    create_kafka_external_gateway_deployment(namespace)
+    create_kafka_external_gateway_service(namespace)
+    # create_kafka_topic("192.168.49.2:32092", ["test-topic"])
 
 if __name__ == "__main__":
     main()
