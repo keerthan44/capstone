@@ -27,6 +27,13 @@ minikube start --driver=docker
 ```shell
 DOCKER_USERNAME=<your_dockerhub_username>, # not used as of now
 KUBERNETES_NAMESPACE=<your_k8s_namespace>, # this is used to create a namespace for all the microservices
+#NODEPORT <VALUE HAS TO BE BETWEEN 30000-32767>
+KAFKA_EXTERNAL_GATEWAY_NODEPORT=32092 # for this variable you can just leave the value as it is
+```
+### Step 2: Minikube Tunnel
+Open a new terminall and make sure the code below is running always. 
+```shell
+minikube tunnel
 ```
 ## Step 1: Build the flask worker container and push to minikube
 ```shell
@@ -40,7 +47,13 @@ eval $(minikube docker-env)
 cd containers/logging/
 docker build -t logging_capstone  .
 ```
-## Step 3: 
+## Step 3: Build the Kafka Gateway Container and push to minikube
+```shell
+eval $(minikube docker-env)
+cd containers/kafka_external_gateway/
+docker build -t kafka-external-gateway  .
+```
+## Step 4: 
 ### Option 1: Use Alibaba Data -- Sample Data 30 Microservices
 1. cd alibaba
 2. python app.py
@@ -51,17 +64,17 @@ docker build -t logging_capstone  .
 2.  python extractDataV2.py.  -- this will create traces.json  
 3.  Choose the file. Sample one is give in ./deathstarbench/data.
 4.  python processData.py
-## Step 4: Create and deploy the containers
+## Step 5: Create and deploy the containers
 ```shell
 cd containers
 python create.py
 ```
-## Step 5: To see logs 
+## Step 6: To see logs 
 ```shell
 POD_NAME=$(kubectl get pods -n static-application | grep logging | awk '{print $1}')  # -n is the namespace will vary based on .env
 kubectl logs $POD_NAME -n static-application
 ```
-## Step 6: To destroy all containers
+## Step 7: To destroy all containers
 ```shell
 cd containers
 python destroy.py
