@@ -107,3 +107,40 @@ def get_or_create_namespace(namespace_name):
             print(f"Namespace '{namespace_name}' created.")
         else:
             raise
+
+def return_ip_if_minikube():
+    try:
+        # Try to get the Minikube IP, which will only work if Minikube is running
+        return subprocess.check_output(["minikube", "ip"]).decode().strip()
+    except subprocess.CalledProcessError:
+        # If the minikube command fails, it's likely not a Minikube environment
+        print("Not running in Minikube.")
+        return False
+
+def get_external_ip_service(service_name, namespace='default'):
+    try:
+        # Load Kubernetes config
+        config.load_kube_config()
+
+        # Create a Kubernetes API client
+        v1 = client.CoreV1Api()
+
+        # Get the service object
+        service = v1.read_namespaced_service(service_name, namespace)
+
+        # Check if the service type is LoadBalancer
+        if service.spec.type == "LoadBalancer":
+            # Get the external IP for a regular cluster or minikube tunnel
+            if service.status.load_balancer.ingress:
+                for ingress in service.status.load_balancer.ingress:
+                    if ingress.ip:
+                        return ingress.ip
+                return "External IP not assigned yet."
+            else:
+                return "External IP not available. Ensure 'minikube tunnel' is running."
+
+        else:
+            return "This service is not of type LoadBalancer."
+    
+    except ApiException as e:
+        return f"Failed to get service information: {e}"

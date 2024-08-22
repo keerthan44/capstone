@@ -1,12 +1,14 @@
 import os
 import json
+import time
 from kubernetes import client, config
 from kubernetes.client import V1Pod, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1Deployment, V1DeploymentSpec, V1PodTemplateSpec, V1LabelSelector, V1Ingress, V1IngressSpec, V1IngressRule, V1IngressBackend
-from kafka_setup import create_kafka_topic, deploy_kafka_environment
-from utils import wait_for_pods_ready, port_forward_and_exec_func, wait_for_service_ready, get_or_create_namespace   
+from kafka_setup import  deploy_kafka_environment, create_topics_http_request
+from utils import wait_for_pods_ready, port_forward_and_exec_func,  get_or_create_namespace   
+import threading
 
 from dotenv import load_dotenv
-from redis_setup import set_start_time_redis, create_redis_deployment, create_redis_service
+from redis_setup import deploy_redis_environment, set_start_time_redis
 
 load_dotenv()  # take environment variables from .env.
 
@@ -205,7 +207,8 @@ def create_container_service(v1, namespace, container_name, port_mappings):
     print(f"Service '{container_name}-service' created in namespace '{namespace}' with ports: {port_mappings}.")
 
 def main():
-    namespace = os.getenv("KUBERNETES_NAMESPACE", "static-application")
+    NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
+    KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "30092"))
     container_names_file = "containers.txt"
     # Load the Kubernetes configuration
     config.load_kube_config()
@@ -216,41 +219,39 @@ def main():
     rbac_v1 = client.RbacAuthorizationV1Api()
 
     
-    # # Ensure the namespace exists
-    get_or_create_namespace(namespace)
+    # Ensure the namespace exists
+    get_or_create_namespace(NAMESPACE)
 
     # Setup Kafka environment
-    deploy_kafka_environment(v1, apps_v1, rbac_v1, namespace)
+    (kafka_replicas, ) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
     # Read container names from file and get renamed containers
-    # container_names, calls = get_and_rename_containers()
+    container_names, calls = get_and_rename_containers()
 
-    # # Create Redis deployment and service
-    # create_redis_deployment(namespace)
-    # create_redis_service(namespace)
-    # wait_for_pods_ready(namespace)
+    # Create Redis deployment and service
+    deploy_redis_environment(NAMESPACE, v1, apps_v1)
+    wait_for_pods_ready(NAMESPACE)
 
-    # port_forward_and_exec_func(namespace, "kafka-service", 9092, 30092, funcToExec=create_kafka_topic, data={"topic_names": container_names, 'namespace': namespace})
-    # create_kafka_topic({"topic_names": container_names, "local_port": 30992, 'namespace': namespace})
-    
-    # # Create Logging deployment and service
-    # create_logging_deployment(namespace, redis_ip="redis-service")
-    # create_logging_service(namespace)
+    # Create Logging deployment and service
+    create_logging_deployment(apps_v1, NAMESPACE, redis_ip="redis-service")
+    create_logging_service(v1, NAMESPACE)
 
-    # # Create ConfigMap for each container's calls.json
-    # for container_name in container_names:
-    #     create_config_map(namespace, f"{container_name}-config", data=json.dumps(calls.get(container_name, {})))
+    # Create ConfigMap for each container's calls.json
+    for container_name in container_names:
+        topics = [ { "name": container_name, "partitions": 1, "replication_factor": kafka_replicas } ]
+        create_config_map(v1, NAMESPACE, f"{container_name}-config", data=json.dumps(calls.get(container_name, {})))
 
-    # # Create deployments for containers
-    # container_jobs = addContainerJob(container_names)
-    # for container_name, container_job in container_jobs:
-    #     create_container_deployment(namespace, container_name, f"{container_name}-config", redis_ip="redis-service", container_job=container_job)
-    # for container_name in container_names:
-    #     create_container_service(namespace, container_name, [{ "port": 80, "target_port": 80 }])
+    # Create deployments for containers
+    container_jobs = addContainerJob(container_names)
+    for container_name in container_names:
+        create_container_service(v1, NAMESPACE, container_name, [{ "port": 80, "target_port": 80 }])
+    for container_name, container_job in container_jobs:
+        create_container_deployment(apps_v1, NAMESPACE, container_name, f"{container_name}-config", redis_ip="redis-service", container_job=container_job)
 
-    # print("All deployments and services are up and running in Kubernetes.")
-    # wait_for_pods_ready(namespace)
-    # port_forward_and_exec_func(namespace, "redis-service", 60892, 6379, funcToExec=set_start_time_redis)
+    wait_for_pods_ready(NAMESPACE)
+    print("All statefulsets, deployments and services are up in Kubernetes.")
+    create_topics_http_request(topics, NAMESPACE, "kafka-instance", "kafka", KAFKA_EXTERNAL_GATEWAY_NODEPORT)
+    port_forward_and_exec_func(NAMESPACE, "redis-service", 60892, 6379, funcToExec=set_start_time_redis)
 
 
 if __name__ == "__main__":

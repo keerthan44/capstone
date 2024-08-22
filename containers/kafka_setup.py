@@ -1,8 +1,11 @@
+import time
 from kubernetes import client, config
 from kubernetes.client import V1Service, V1ObjectMeta, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1PodSpec, V1Container, V1ContainerPort, V1PersistentVolumeClaim, V1EnvVar
 from kubernetes.client.rest import ApiException
+from utils import return_ip_if_minikube, get_external_ip_service, wait_for_pods_ready
 
-
+import os
+import requests
 
 def create_zookeeper_service(v1, namespace):
     service = V1Service(
@@ -38,7 +41,7 @@ def create_zookeeper_statefulset(apps_v1, namespace):
     apps_v1.create_namespaced_stateful_set(namespace=namespace, body=statefulset)
     print(f"Zookeeper StatefulSet created in namespace '{namespace}'.")
 
-def create_kafka_service(v1, namespace):
+def create_kafka_headless_service(v1, namespace):
     service = V1Service(
         metadata=V1ObjectMeta(name="kafka", namespace=namespace, labels={"service": "kafka-instance"}),
         spec=V1ServiceSpec(
@@ -96,6 +99,7 @@ def create_kafka_statefulset(apps_v1, namespace):
     
     apps_v1.create_namespaced_stateful_set(namespace=namespace, body=statefulset)
     print(f"Kafka StatefulSet with {replicas} replica(s) created in namespace '{namespace}'.")
+    return replicas
 
 
 def create_kafka_external_gateway_deployment(apps_v1, namespace):
@@ -132,11 +136,11 @@ def create_kafka_external_gateway_deployment(apps_v1, namespace):
     except ApiException as e:
         print(f"Exception when creating Deployment: {e}")
 
-def create_kafka_external_gateway_service(v1, namespace):
+def create_kafka_external_gateway_service(v1, namespace, kafka_external_gateway_nodeport):
     """Create a Kubernetes Service with LoadBalancer type."""
     service_spec = client.V1ServiceSpec(
         selector={"app": "kafka-external-gateway"},
-        ports=[client.V1ServicePort(port=80, target_port=8080, node_port=32092)],
+        ports=[client.V1ServicePort(port=80, target_port=8080, node_port=kafka_external_gateway_nodeport)],
         type="LoadBalancer"
     )
     service = client.V1Service(
@@ -215,19 +219,56 @@ def create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namesp
             print(f"Exception when creating or updating RoleBinding: {e}")
             raise
 
-def deploy_kafka_environment(namespace, v1, apps_v1, rbac_v1):
+
+def create_topics_http_request(topics, namespace, kafka_statefulset_name, kafka_service_name, kafka_external_gateway_nodeport, timeout=60, poll_interval=5, retries=3):
+    ip_addr = return_ip_if_minikube()
+    if not ip_addr:
+        ip_addr = get_external_ip_service(kafka_service_name, namespace)
+    if not ip_addr:
+        raise Exception("Failed to get the Kafka service IP address.")
+    
+    data = {
+        "topics": topics,
+        "namespace": namespace,
+        "kafka_statefulset_name": kafka_statefulset_name,
+        "kafka_service_name": kafka_service_name,
+        "timeout": timeout,
+        "poll_interval": poll_interval
+    }
+    url = f"http://{ip_addr}:{kafka_external_gateway_nodeport}/create_topics"
+    
+    for attempt in range(retries):
+        print(f"Attempt {attempt + 1} to send HTTP request to create topics.")
+        try:
+            response = requests.post(url, json=data)
+            if response.status_code == 200:
+                print("Request successful:", response.json())
+                return  # Exit the function if request is successful
+            else:
+                print(f"Failed to create topics. Status code: {response.status_code}, Response: {response.text}")
+        except requests.exceptions.RequestException as e:
+            print(f"An error occurred: {e}")
+        
+        # Wait before retrying
+        if attempt < retries - 1:
+            time.sleep(poll_interval)
+    raise Exception("Failed to create topics after multiple attempts.")
+
+
+def deploy_kafka_environment(namespace, v1, apps_v1, rbac_v1, kafka_external_gateway_nodeport):
     # Deploy Zookeeper
     create_zookeeper_service(v1, namespace)
     create_zookeeper_statefulset(apps_v1, namespace)
-
+    wait_for_pods_ready(namespace)
     # Deploy Kafka
-    create_kafka_service(v1, namespace)
-    create_kafka_statefulset(apps_v1, namespace)
+    create_kafka_headless_service(v1, namespace)
+    kafka_replicas = create_kafka_statefulset(apps_v1, namespace)
 
     # Deploy Kafka External Gateway
     create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namespace)
-    create_kafka_external_gateway_service(v1, namespace)
+    create_kafka_external_gateway_service(v1, namespace, kafka_external_gateway_nodeport)
     create_kafka_external_gateway_deployment(apps_v1, namespace)
+    return (kafka_replicas, )
 
 
 def main():
@@ -240,15 +281,17 @@ def main():
 
     create_zookeeper_service(v1, namespace)
     create_zookeeper_statefulset(apps_v1, namespace)
+    wait_for_pods_ready(namespace)
 
     # Deploy Kafka
-    create_kafka_service(v1, namespace)
+    create_kafka_headless_service(v1, namespace)
     create_kafka_statefulset(apps_v1, namespace)
 
     # Deploy Kafka External Gateway
     create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namespace)
-    create_kafka_external_gateway_service(v1, namespace)
+    create_kafka_external_gateway_service(v1, namespace, 32092)
     create_kafka_external_gateway_deployment(apps_v1, namespace)
 
 if __name__ == "__main__":
     main()
+    # create_topics_http_request([{"name": "test-topic"}], "static-application", "kafka-instance", "kafka", 32092)
