@@ -24,8 +24,9 @@ def create_redis_service(v1, namespace):
             ports=[V1ServicePort(port=6379, target_port=6379)]
         )
     )
-    v1.create_namespaced_service(namespace=namespace, body=service)
+    response = v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Redis Service created in namespace '{namespace}'.")
+    return response.metadata.name
 
 def create_redis_deployment(apps_v1, namespace):
     container = V1Container(
@@ -43,8 +44,9 @@ def create_redis_deployment(apps_v1, namespace):
 
 def deploy_redis_environment(namespace, v1, apps_v1):
     #Deploy Redis
-    create_redis_service(v1, namespace)
+    redis_service_name = create_redis_service(v1, namespace)
     create_redis_deployment(apps_v1, namespace)
+    return (redis_service_name, )
 
 def main():
     config.load_kube_config()

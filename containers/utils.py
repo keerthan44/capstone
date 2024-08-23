@@ -1,3 +1,4 @@
+import json
 import re
 import time
 from kubernetes import client, config
@@ -146,7 +147,7 @@ def get_external_ip_service(service_name, namespace='default'):
     except ApiException as e:
         return f"Failed to get service information: {e}"
 
-def get_minikube_service_ip(service_name, namespace):
+def get_minikube_service_ip_port(service_name, namespace):
     # Retrieve the URL of a Minikube service using the `minikube service` command
     try:
         result = subprocess.run(
@@ -156,17 +157,56 @@ def get_minikube_service_ip(service_name, namespace):
             stderr=subprocess.PIPE,
             text=True
         )
+        
         # The output should contain the full URL, e.g., http://<ip>:<port>
         url = result.stdout.strip()
 
-        # Extract the IP address from the URL using a regular expression
-        match = re.search(r'http://([\d\.]+):\d+', url)
+        # Extract IP and port using regex
+        match = re.match(r'http://([\d\.]+):(\d+)', url)
+        
         if match:
             ip_address = match.group(1)
-            return ip_address
+            port = match.group(2)
+            print("Recieved IP address and port: ", ip_address, port)
+            return ip_address, port
         else:
-            print("Failed to parse IP address from URL.")
-            return None
+            print("Failed to parse URL")
+            return None, None
     except subprocess.CalledProcessError as e:
         print(f"Failed to retrieve Minikube service IP: {e}")
-        return None
+        return None, None
+
+def get_service_external_ip_forwarded_port(service_name, namespace=None, target_port=None, node_port_default=None):
+    # Construct the kubectl command
+    cmd = ['kubectl', 'get', 'svc', service_name, '-o', 'json']
+    
+    if namespace:
+        cmd.extend(['-n', namespace])
+    
+    try:
+        # Run the kubectl command
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        
+        # Parse the JSON output
+        svc_info = json.loads(result.stdout)
+        
+        # Extract the external IP (LoadBalancer IP or hostname)
+        external_ip = svc_info.get('status', {}).get('loadBalancer', {}).get('ingress', [{}])[0].get('ip', None)
+        
+        # Find the matching node port for the specified target port
+        for port_info in svc_info.get('spec', {}).get('ports', []):
+            if port_info.get('port') == target_port:
+                node_port = port_info.get('nodePort')
+                break
+        else:
+            node_port = node_port_default
+        
+        if external_ip and node_port:
+            print("Recieved ip address and port:", external_ip, node_port)
+            return external_ip, node_port
+        else:
+            print("No ip address and port recieved")
+            return None, None
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to get service info: {e}")
+        return None, None

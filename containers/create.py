@@ -223,13 +223,13 @@ def main():
     get_or_create_namespace(NAMESPACE)
 
     # Setup Kafka environment
-    (kafka_replicas, ) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
+    (kafka_replicas, kafka_statefulset_name, kafka_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
     # Read container names from file and get renamed containers
     container_names, calls = get_and_rename_containers()
 
     # Create Redis deployment and service
-    deploy_redis_environment(NAMESPACE, v1, apps_v1)
+    (redis_service_name, ) = deploy_redis_environment(NAMESPACE, v1, apps_v1)
     wait_for_pods_ready(NAMESPACE)
 
     # Create Logging deployment and service
@@ -250,8 +250,8 @@ def main():
 
     wait_for_pods_ready(NAMESPACE)
     print("All statefulsets, deployments and services are up in Kubernetes.")
-    create_topics_http_request(topics, NAMESPACE, "kafka-instance", "kafka", KAFKA_EXTERNAL_GATEWAY_NODEPORT)
-    port_forward_and_exec_func(NAMESPACE, "redis-service", 60892, 6379, funcToExec=set_start_time_redis)
+    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kafka_gateway_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
+    port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
 
 
 if __name__ == "__main__":

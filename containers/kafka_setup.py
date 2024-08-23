@@ -2,7 +2,7 @@ import time
 from kubernetes import client, config
 from kubernetes.client import V1Service, V1ObjectMeta, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1PodSpec, V1Container, V1ContainerPort, V1PersistentVolumeClaim, V1EnvVar
 from kubernetes.client.rest import ApiException
-from utils import return_ip_if_minikube, get_external_ip_service, wait_for_pods_ready, get_minikube_service_ip
+from utils import get_service_external_ip_forwarded_port, wait_for_pods_ready, get_minikube_service_ip_port
 
 import os
 import requests
@@ -97,9 +97,9 @@ def create_kafka_statefulset(apps_v1, namespace):
         )
     )
     
-    apps_v1.create_namespaced_stateful_set(namespace=namespace, body=statefulset)
+    response = apps_v1.create_namespaced_stateful_set(namespace=namespace, body=statefulset)
     print(f"Kafka StatefulSet with {replicas} replica(s) created in namespace '{namespace}'.")
-    return replicas
+    return replicas, response.metadata.name
 
 
 def create_kafka_external_gateway_deployment(apps_v1, namespace):
@@ -148,10 +148,12 @@ def create_kafka_external_gateway_service(v1, namespace, kafka_external_gateway_
         spec=service_spec
     )
     try:
-        v1.create_namespaced_service(namespace=namespace, body=service)
+        response = v1.create_namespaced_service(namespace=namespace, body=service)
         print(f"Service created in namespace '{namespace}'.")
+        return response.metadata.name  # Return the name of the created service
     except ApiException as e:
         print(f"Exception when creating Service: {e}")
+        return None
     
 def create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namespace):
     """Create or update a Kubernetes Role and RoleBinding for managing Kafka External Gateway resources."""
@@ -221,13 +223,12 @@ def create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namesp
 
 
 def create_topics_http_request(topics, namespace, kafka_statefulset_name, kafka_service_name, kafka_external_gateway_nodeport, timeout=60, poll_interval=5, retries=3):
-    ip_addr = return_ip_if_minikube()
-    if ip_addr:
-        ip_addr = get_minikube_service_ip(kafka_service_name, namespace)
-    else:
-        ip_addr = get_external_ip_service(kafka_service_name, namespace)
-    if not ip_addr:
-        raise Exception("Failed to get the Kafka service IP address.")
+    kafka_gateway_ip_port = get_minikube_service_ip_port(kafka_service_name, namespace)
+    if not kafka_gateway_ip_port[0] or not kafka_gateway_ip_port[1]:
+        kafka_gateway_ip_port = get_service_external_ip_forwarded_port(kafka_service_name, namespace, target_port=80, node_port_default=kafka_external_gateway_nodeport)
+    kafka_gateway_ip, kafka_gateway_port = kafka_gateway_ip_port
+    if not kafka_gateway_ip or not kafka_gateway_port:
+        raise RuntimeError("Failed to get Kafka External Gateway IP and port.")
     
     data = {
         "topics": topics,
@@ -237,7 +238,7 @@ def create_topics_http_request(topics, namespace, kafka_statefulset_name, kafka_
         "timeout": timeout,
         "poll_interval": poll_interval
     }
-    url = f"http://{ip_addr}:{kafka_external_gateway_nodeport}/create_topics"
+    url = f"http://{kafka_gateway_ip}:{kafka_gateway_port}/create_topics"
     
     attempt = 1
     while True:
@@ -262,13 +263,13 @@ def deploy_kafka_environment(namespace, v1, apps_v1, rbac_v1, kafka_external_gat
     wait_for_pods_ready(namespace)
     # Deploy Kafka
     create_kafka_headless_service(v1, namespace)
-    kafka_replicas = create_kafka_statefulset(apps_v1, namespace)
+    (kafka_replicas, kafka_statefulset_name) = create_kafka_statefulset(apps_v1, namespace)
 
     # Deploy Kafka External Gateway
     create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namespace)
-    create_kafka_external_gateway_service(v1, namespace, kafka_external_gateway_nodeport)
+    kafka_gateway_service_name = create_kafka_external_gateway_service(v1, namespace, kafka_external_gateway_nodeport)
     create_kafka_external_gateway_deployment(apps_v1, namespace)
-    return (kafka_replicas, )
+    return (kafka_replicas, kafka_statefulset_name, kafka_gateway_service_name)
 
 
 def main():
@@ -293,5 +294,5 @@ def main():
     create_kafka_external_gateway_deployment(apps_v1, namespace)
 
 if __name__ == "__main__":
-    main()
-    # create_topics_http_request([{"name": "test-topic"}], "static-application", "kafka-instance", "kafka", 32092)
+    # main()
+    create_topics_http_request([{"name": "test-topic"}], "static-application", "kafka-instance", "kafka-external-gateway", 32092)
