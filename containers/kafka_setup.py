@@ -2,7 +2,7 @@ import time
 from kubernetes import client, config
 from kubernetes.client import V1Service, V1ObjectMeta, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1PodSpec, V1Container, V1ContainerPort, V1PersistentVolumeClaim, V1EnvVar
 from kubernetes.client.rest import ApiException
-from utils import return_ip_if_minikube, get_external_ip_service, wait_for_pods_ready
+from utils import return_ip_if_minikube, get_external_ip_service, wait_for_pods_ready, get_minikube_service_ip
 
 import os
 import requests
@@ -222,7 +222,9 @@ def create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namesp
 
 def create_topics_http_request(topics, namespace, kafka_statefulset_name, kafka_service_name, kafka_external_gateway_nodeport, timeout=60, poll_interval=5, retries=3):
     ip_addr = return_ip_if_minikube()
-    if not ip_addr:
+    if ip_addr:
+        ip_addr = get_minikube_service_ip(kafka_service_name, namespace)
+    else:
         ip_addr = get_external_ip_service(kafka_service_name, namespace)
     if not ip_addr:
         raise Exception("Failed to get the Kafka service IP address.")

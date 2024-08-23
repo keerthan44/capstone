@@ -1,3 +1,4 @@
+import re
 import time
 from kubernetes import client, config
 import signal
@@ -144,3 +145,28 @@ def get_external_ip_service(service_name, namespace='default'):
     
     except ApiException as e:
         return f"Failed to get service information: {e}"
+
+def get_minikube_service_ip(service_name, namespace):
+    # Retrieve the URL of a Minikube service using the `minikube service` command
+    try:
+        result = subprocess.run(
+            ["minikube", "service", service_name, "-n", namespace, "--url"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        # The output should contain the full URL, e.g., http://<ip>:<port>
+        url = result.stdout.strip()
+
+        # Extract the IP address from the URL using a regular expression
+        match = re.search(r'http://([\d\.]+):\d+', url)
+        if match:
+            ip_address = match.group(1)
+            return ip_address
+        else:
+            print("Failed to parse IP address from URL.")
+            return None
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to retrieve Minikube service IP: {e}")
+        return None
