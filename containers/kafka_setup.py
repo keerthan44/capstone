@@ -237,8 +237,9 @@ def create_topics_http_request(topics, namespace, kafka_statefulset_name, kafka_
     }
     url = f"http://{ip_addr}:{kafka_external_gateway_nodeport}/create_topics"
     
-    for attempt in range(retries):
-        print(f"Attempt {attempt + 1} to send HTTP request to create topics.")
+    attempt = 1
+    while True:
+        print(f"Attempt {attempt} to send HTTP request to create topics.")
         try:
             response = requests.post(url, json=data)
             if response.status_code == 200:
@@ -248,11 +249,8 @@ def create_topics_http_request(topics, namespace, kafka_statefulset_name, kafka_
                 print(f"Failed to create topics. Status code: {response.status_code}, Response: {response.text}")
         except requests.exceptions.RequestException as e:
             print(f"An error occurred: {e}")
-        
-        # Wait before retrying
-        if attempt < retries - 1:
-            time.sleep(poll_interval)
-    raise Exception("Failed to create topics after multiple attempts.")
+        time.sleep(10)
+        attempt += 1
 
 
 def deploy_kafka_environment(namespace, v1, apps_v1, rbac_v1, kafka_external_gateway_nodeport):
