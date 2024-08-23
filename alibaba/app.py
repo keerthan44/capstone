@@ -11,25 +11,23 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload():
-    file = request.files['file']
-    if not file:
-        return "No file"
+    file1 = request.files['file1']
+    file2 = request.files['file2']
 
-    def read_and_sort_csv(file_path):
-        # Read the CSV file
-        df = pd.read_csv(file_path)
+    if not file1 or not file2:
+        return "Both files are required"
 
-        # Sort the dataframe by the 'timestamp' column
+    def read_and_sort_csv(file):
+        df = pd.read_csv(file)
         sorted_df = df.sort_values(by='timestamp')
-
         return sorted_df
 
-    df = read_and_sort_csv(file)
-
+    # Process the first CSV to generate calls.json
+    df1 = read_and_sort_csv(file1)
     result = {}
-    containers = []
+    containers = set()
 
-    for index, row in df.iterrows():
+    for _, row in df1.iterrows():
         timestamp = row['timestamp']
         um = row['um']
         dm = row['dm']
@@ -37,10 +35,7 @@ def upload():
 
         if '?' in um or '?' in dm:
             continue
-        if um not in containers:
-            containers.append(um)
-        if dm not in containers:
-            containers.append(dm)
+        containers.update([um, dm])
 
         if um not in result:
             result[um] = {}
@@ -52,14 +47,47 @@ def upload():
             "communication_type": rpctype
         })
 
-    os.makedirs('../containers', exist_ok=True)
+    # Process the second CSV to generate containers.json
+    df2 = pd.read_csv(file2)
+    ms_replicas = {}
+
+    for _, row in df2.iterrows():
+        msname = row['msName']
+        msinstanceid = row['msinstanceid']
+
+        if msname not in ms_replicas:
+            ms_replicas[msname] = set()
+
+        ms_replicas[msname].add(msinstanceid)
+
+    # Debugging: Print to console to verify content
+    print("ms_replicas:", ms_replicas)
+
+    containers_json = [
+        {"msName": msname, "replicas": len(instances)}
+        for msname, instances in ms_replicas.items()
+    ]
+
+    # Debugging: Print to console to verify content
+    print("containers_json:", containers_json)
+
+    # output_directory = os.path.join(os.getcwd(), 'containers')
+    # os.makedirs(output_directory, exist_ok=True)
+
+    # Write calls.json
     with open('../containers/calls.json', 'w') as f:
         json.dump(result, f, indent=4)
 
-    with open('../containers/containers.txt', 'w') as f:
-        f.writelines(f"{container}\n" for container in containers)
+    # Write containers.json
+    with open('../containers/containers.json', 'w') as f:
+        json.dump(containers_json, f, indent=4)
 
-    return jsonify(result)
+    # Debugging: Confirm that the file was written
+    
+    return jsonify({
+        "calls": result,
+        "containers": containers_json
+    })
 
 if __name__ == '__main__':
     app.run(debug=True, port=3000)

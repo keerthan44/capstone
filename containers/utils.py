@@ -95,18 +95,18 @@ def kill_process_on_port(local_port):
     except subprocess.CalledProcessError:
         print(f'No process found using port {local_port}')
 
-def get_or_create_namespace(namespace_name):
+def get_or_create_namespace(namespace):
     # Load kube config and create a client
     config.load_kube_config()
     v1 = client.CoreV1Api()
 
     try:
-        v1.read_namespace(name=namespace_name)
-        print(f"Namespace '{namespace_name}' already exists.")
+        v1.read_namespace(name=namespace)
+        print(f"Namespace '{namespace}' already exists.")
     except client.exceptions.ApiException as e:
         if e.status == 404:
-            v1.create_namespace(client.V1Namespace(metadata=client.V1ObjectMeta(name=namespace_name)))
-            print(f"Namespace '{namespace_name}' created.")
+            v1.create_namespace(client.V1Namespace(metadata=client.V1ObjectMeta(name=namespace)))
+            print(f"Namespace '{namespace}' created.")
         else:
             raise
 
