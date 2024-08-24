@@ -211,7 +211,7 @@ def create_container_service(v1, namespace, container_name, port_mappings):
 
 def main():
     NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
-    KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "30092"))
+    KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "32092"))
     container_names_file = "containers_fake.txt"
     # Load the Kubernetes configuration
     config.load_kube_config()
