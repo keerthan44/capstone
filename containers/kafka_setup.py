@@ -53,8 +53,9 @@ def create_kafka_headless_service(v1, namespace):
             cluster_ip="None"  # Makes the service headless
         )
     )
-    v1.create_namespaced_service(namespace=namespace, body=service)
+    response = v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Headless Kafka Service created in namespace '{namespace}'.")
+    return response.metadata.name  # Return the name of the created service
 
 
 def create_kafka_statefulset(apps_v1, namespace):
@@ -222,10 +223,10 @@ def create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namesp
             raise
 
 
-def create_topics_http_request(topics, namespace, kafka_statefulset_name, kafka_service_name, kafka_external_gateway_nodeport, timeout=60, poll_interval=5, retries=3):
-    kafka_gateway_ip_port = get_minikube_service_ip_port(kafka_service_name, namespace)
+def create_topics_http_request(topics, namespace, kafka_statefulset_name, kafka_external_gateway_name ,kafka_service_name, kafka_external_gateway_nodeport, timeout=60, poll_interval=5, retries=3):
+    kafka_gateway_ip_port = get_minikube_service_ip_port(kafka_external_gateway_name, namespace)
     if not kafka_gateway_ip_port[0] or not kafka_gateway_ip_port[1]:
-        kafka_gateway_ip_port = get_service_external_ip_forwarded_port(kafka_service_name, namespace, target_port=80, node_port_default=kafka_external_gateway_nodeport)
+        kafka_gateway_ip_port = get_service_external_ip_forwarded_port(kafka_external_gateway_name, namespace, target_port=80, node_port_default=kafka_external_gateway_nodeport)
     kafka_gateway_ip, kafka_gateway_port = kafka_gateway_ip_port
     if not kafka_gateway_ip or not kafka_gateway_port:
         raise RuntimeError("Failed to get Kafka External Gateway IP and port.")
@@ -262,14 +263,14 @@ def deploy_kafka_environment(namespace, v1, apps_v1, rbac_v1, kafka_external_gat
     create_zookeeper_statefulset(apps_v1, namespace)
     wait_for_pods_ready(namespace)
     # Deploy Kafka
-    create_kafka_headless_service(v1, namespace)
+    kafka_headless_service_name = create_kafka_headless_service(v1, namespace)
     (kafka_replicas, kafka_statefulset_name) = create_kafka_statefulset(apps_v1, namespace)
 
     # Deploy Kafka External Gateway
     create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namespace)
     kafka_gateway_service_name = create_kafka_external_gateway_service(v1, namespace, kafka_external_gateway_nodeport)
     create_kafka_external_gateway_deployment(apps_v1, namespace)
-    return (kafka_replicas, kafka_statefulset_name, kafka_gateway_service_name)
+    return (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kafka_gateway_service_name)
 
 
 def main():
@@ -294,5 +295,5 @@ def main():
     create_kafka_external_gateway_deployment(apps_v1, namespace)
 
 if __name__ == "__main__":
-    # main()
-    create_topics_http_request([{"name": "test-topic"}], "static-application", "kafka-instance", "kafka-external-gateway", 32092)
+    main()
+    # create_topics_http_request([{"name": "test-topic"}], "static-application", "kafka-instance", "kafka-external-gateway", 32092)

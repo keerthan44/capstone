@@ -48,21 +48,15 @@ def get_kafka_brokers(namespace, kafka_statefulset_name, kafka_service_name='kaf
             return list(brokers)
         else:
             print("No brokers found", file=sys.stderr)
-            return None
+            return []
         
     except ApiException as e:
         print(f"Error retrieving Kafka brokers: {e}", file=sys.stderr)
         return []
 
-def get_random_broker(brokers):
-    """Select a random Kafka broker from the list."""
-    if not brokers:
-        return None
-    return random.choice(brokers)
-
-def create_kafka_topics(broker, topics, timeout=60, poll_interval=5):
+def create_kafka_topics(brokers, topics, timeout=60, poll_interval=5):
     # Initialize Kafka Admin Client
-    admin_client = AdminClient({'bootstrap.servers': broker})
+    admin_client = AdminClient({'bootstrap.servers': ",".join(brokers)})
 
     # Define topics to create
     new_topics = [NewTopic(
@@ -120,7 +114,6 @@ def create_topics():
     poll_interval = data.get('poll_interval', 5)
 
     brokers = get_kafka_brokers(namespace, kafka_statefulset_name, kafka_service_name)
-    broker = get_random_broker(brokers)
 
     if not topics:
         return jsonify({'status': 'error', 'message': 'No topics provided'}), 400
@@ -129,12 +122,12 @@ def create_topics():
     if not all(isinstance(item, dict) for item in topics):
         return jsonify({'status': 'error', 'message': 'All items in the array should be dictionaries'}), 400
 
-    if broker is None:
+    if not brokers:
         return jsonify({'status': 'error', 'message': 'No brokers available'}), 500
 
     try:
-        create_kafka_topics(broker, topics, timeout, poll_interval)
-        return jsonify({'status': 'success', 'broker': broker})
+        create_kafka_topics(brokers, topics, timeout, poll_interval)
+        return jsonify({'status': 'success', 'broker': brokers})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -148,12 +141,11 @@ def send_messages():
     kafka_service_name = data.get('kafka_service_name', 'kafka')
 
     brokers = get_kafka_brokers(namespace, kafka_statefulset_name, kafka_service_name)
-    broker = get_random_broker(brokers)
     
-    if broker is None:
+    if not brokers:
         return jsonify({'status': 'error', 'message': 'No brokers available'}), 500
 
-    producer = Producer({'bootstrap.servers': broker})
+    producer = Producer({'bootstrap.servers': brokers})
 
     errors = []
     for message in messages:
@@ -168,8 +160,8 @@ def send_messages():
     producer.flush()
     
     if errors:
-        return jsonify({'status': 'partial_success', 'broker': broker, 'errors': errors}), 207
-    return jsonify({'status': 'success', 'broker': broker})
+        return jsonify({'status': 'partial_success', 'broker': brokers, 'errors': errors}), 207
+    return jsonify({'status': 'success', 'broker': brokers})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)

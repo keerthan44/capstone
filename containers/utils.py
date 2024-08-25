@@ -149,48 +149,32 @@ def get_external_ip_service(service_name, namespace='default'):
         return f"Failed to get service information: {e}"
 
 def get_minikube_service_ip_port(service_name, namespace):
-    """Retrieve the IP and port of a Minikube service and forcefully terminate the command."""
-    def target():
-        nonlocal url
-        try:
-            result = subprocess.run(
-                ["minikube", "service", service_name, "-n", namespace, "--url"],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=30  # Add a timeout to avoid hanging
-            )
-            url = result.stdout.strip()
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to retrieve Minikube service IP: {e}")
-        except subprocess.TimeoutExpired as e:
-            print(f"Command timed out: {e}")
+    # Retrieve the URL of a Minikube service using the `minikube service` command
+    try:
+        result = subprocess.run(
+            ["minikube", "service", service_name, "-n", namespace, "--url"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        # The output should contain the full URL, e.g., http://<ip>:<port>
+        url = result.stdout.strip()
 
-    url = ""
-    thread = threading.Thread(target=target)
-    thread.start()
-
-    # Wait a bit and then stop the thread if it has finished
-    thread.join(timeout=30)  # Adjust timeout as needed
-
-    # Check if thread is still running and forcefully terminate it if needed
-    if thread.is_alive():
-        print("Terminating command as it took too long.")
-        # This will not stop the running process but only handles the function return
-        # If you need to terminate the process forcefully, additional work is needed.
-        return None, None
-
-    # Extract IP and port using regex
-    match = re.match(r'http://([\d\.]+):(\d+)', url)
-
-    if match:
-        ip_address = match.group(1)
-        port = match.group(2)
-        print("Received IP address and port:", ip_address, port)
-        return ip_address, port
-    else:
-        print("Failed to parse URL")
+        # Extract IP and port using regex
+        match = re.match(r'http://([\d\.]+):(\d+)', url)
+        
+        if match:
+            ip_address = match.group(1)
+            port = match.group(2)
+            print("Recieved IP address and port: ", ip_address, port)
+            return ip_address, port
+        else:
+            print("Failed to parse URL")
+            return None, None
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to retrieve Minikube service IP: {e}")
         return None, None
 
 def get_service_external_ip_forwarded_port(service_name, namespace=None, target_port=None, node_port_default=None):

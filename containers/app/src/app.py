@@ -6,13 +6,15 @@ import docker
 import os
 import redis
 import sys
-from communication_type.http.flask_server import start_flask, make_http_call 
+from communication_type.http.flask_server import start_flask_process, make_http_call 
+from communication_type.kafka.kafka_related import produce_kafka_messages, start_kafka_consumer_process
 
-container_name = os.environ.get("CONTAINER_NAME")
-redis_ip = os.environ.get("REDIS_IP_ADDRESS")
-container_job = os.environ.get("CONTAINER_JOB")
-namespace = os.environ.get("NAMESPACE")
-redis_client = redis.StrictRedis(host=f'{redis_ip}', port=6379)
+CONTAINER_NAME = os.environ.get("CONTAINER_NAME")
+REDIS_IP = os.environ.get("REDIS_IP_ADDRESS")
+CONTAINER_JOB = os.environ.get("CONTAINER_JOB")
+NAMESPACE = os.environ.get("NAMESPACE")
+
+redis_client = redis.StrictRedis(host=f'{REDIS_IP}', port=6379)
 start_time = ''
 
 def get_timestamp_to_call(start_time, calls_list):
@@ -35,17 +37,13 @@ def call_containers(containers, timestamp):
     for container in containers:
         dm_service = container['dm_service']
         communication_type = container['communication_type']
+        json_data = {**container, 'timestamp': timestamp, "um": CONTAINER_NAME}
         print(f"sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
         match communication_type:
-            case 'mc':
-                try:
-                    response = requests.post(f"http://{dm_service}-service/", 
-                                            json={"timestamp": timestamp, "um": container_name})
-                    print(f"Contacted {dm_service} with communication_type {communication_type}: {response.text}", file=sys.stderr)
-                except requests.exceptions.RequestException as e:
-                    print(f"Failed to contact {dm_service}: {e}", file=sys.stderr)
+            case 'async':
+                produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data)
             case _:
-                make_http_call({**container, 'timestamp': timestamp})
+                make_http_call(json_data)
 
 def sleep_according_to_call_list(calls_list, start_time):
     if calls_list:
@@ -65,14 +63,13 @@ def contact_containers(calls):
     print(calls_list, file=sys.stderr)
     
     while True:
-        print("Waiting for start_time")
         if redis_client.exists('start_time'):
             print("start_time found")
             start_time = int(redis_client.get('start_time'))
             break
         time.sleep(0.000001)
     
-    if container_job == '0':
+    if CONTAINER_JOB == '0':
         while True:
             timestamp, timestamps = get_timestamp_to_call(start_time, calls_list)
             print(timestamp, timestamps, file=sys.stderr)
@@ -126,5 +123,6 @@ if __name__ == "__main__":
     print(calls)
     if calls:
         threading.Thread(target=contact_containers, args=(calls,)).start()
-    start_flask()
+    kafka_process = start_kafka_consumer_process(NAMESPACE, 'kafka-instance', 'kafka', f'{CONTAINER_NAME}-group', CONTAINER_NAME, CONTAINER_NAME)
+    flask_process = start_flask_process()
     

@@ -226,7 +226,7 @@ def main():
     get_or_create_namespace(NAMESPACE)
 
     # Setup Kafka environment
-    (kafka_replicas, kafka_statefulset_name, kafka_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
+    (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
     # Read container names and replicas from file and get renamed containers
     orignal_container_with_replicas, renamed_containers, calls = get_and_rename_containers()
@@ -241,9 +241,11 @@ def main():
     renamed_containers_names = renamed_containers.values()
     
     # Create ConfigMap for each container's calls.json
+    topics = []
     for container_name in renamed_containers_names:
-        topics = [ { "name": container_name, "partitions": 1, "replication_factor": kafka_replicas } ]
+        topics.append({ "name": container_name, "partitions": 1, "replication_factor": kafka_replicas })
         create_config_map(v1, NAMESPACE, f"{container_name}-config", data=json.dumps(calls.get(container_name, {})))
+    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
     # Create deployments for containers
     container_jobs = addContainerJob(orignal_container_with_replicas.keys())
@@ -256,7 +258,6 @@ def main():
 
     wait_for_pods_ready(NAMESPACE)
     print("All statefulsets, deployments and services are up in Kubernetes.")
-    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kafka_gateway_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
     port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
 
 
