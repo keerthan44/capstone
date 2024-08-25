@@ -3,7 +3,7 @@ import grpc
 from .contact_grpc_pb2 import ContactResponse
 from .contact_grpc_pb2_grpc import LoggerServiceServicer, add_LoggerServiceServicer_to_server
 from multiprocessing import Process
-from ..http.flask_server import make_http_call_to_logging_server
+from ..http.http_client import make_http_call_to_logging_server
 
 class LoggerService(LoggerServiceServicer):
     def ContactServer(self, request, context):

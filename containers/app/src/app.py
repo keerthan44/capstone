@@ -6,8 +6,13 @@ import docker
 import os
 import redis
 import sys
-from communication_type.http.flask_server import start_flask_process, make_http_call 
-from communication_type.kafka.kafka_related import produce_kafka_messages, start_kafka_consumer_process
+
+from communication_type.http.http_server import start_flask_process
+from communication_type.http.http_client import make_http_call
+
+from communication_type.kafka.kafka_producer import produce_kafka_messages
+from communication_type.kafka.kafka_consumer import start_kafka_consumer_process
+
 from communication_type.rpc.rpc_client import contact_rpc_server
 from communication_type.rpc.rpc_server import run_grpc_server_process
 
