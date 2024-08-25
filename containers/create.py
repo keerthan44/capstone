@@ -1,61 +1,17 @@
 import os
 import json
-import time
-import redis
 from kubernetes import client, config
 from kubernetes.client import V1Pod, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1Deployment, V1DeploymentSpec, V1PodTemplateSpec, V1LabelSelector, V1Ingress, V1IngressSpec, V1IngressRule, V1IngressBackend
+from kafka_setup import  deploy_kafka_environment, create_topics_http_request
+from utils import wait_for_pods_ready, port_forward_and_exec_func,  get_or_create_namespace   
 
 from dotenv import load_dotenv
-import subprocess
+from redis_setup import deploy_redis_environment, set_start_time_redis
 
 load_dotenv()  # take environment variables from .env.
 
-# Load the Kubernetes configuration
-config.load_kube_config()
-
-# Kubernetes API client
-v1 = client.CoreV1Api()
-apps_v1 = client.AppsV1Api()
-networking_v1 = client.NetworkingV1Api()  # For Ingress
 
 dockerUsername = os.getenv("DOCKER_USERNAME")
-
-def wait_for_pods_ready(namespace):
-    # Load kube config and create a client
-    config.load_kube_config()
-    v1 = client.CoreV1Api()
-
-    while True:
-        pods = v1.list_namespaced_pod(namespace)
-        if all(pod.status.phase == 'Running' for pod in pods.items):
-            print("All pods are running.")
-            break
-        print("Waiting for pods to be ready...")
-        time.sleep(1)
-
-def port_forward_and_update_time(namespace, service_name, local_port=6379, remote_port=6379):
-    # Start port forwarding in a subprocess
-    process = subprocess.Popen([
-        'kubectl', 'port-forward', f'service/{service_name}', f'{local_port}:{remote_port}', '-n', namespace
-    ])
-
-    # Wait a few seconds to ensure port forwarding is established
-    time.sleep(5)
-
-    # Connect to Redis
-    r = redis.Redis(host='localhost', port=local_port)
-    print("Connected to Redis.")
-    
-    # Example operation: Get a value from Redis
-    try:
-        r.set('start_time', time.time_ns())  # Store time in milliseconds
-        print("Redis Start Time value is now set at", r.get('start_time'))
-        print("Containers will start communicating")
-    except Exception as e:
-        print(f"Error: {e}")
-    
-    # Optionally, you can stop the port forwarding process if needed
-    process.terminate()
 
 # Function to read container names from a file
 def read_container_names(file_path):
@@ -128,7 +84,6 @@ def get_and_rename_containers(containersFile="containers_fake.json", callsFile="
 
 def addContainerJob(container_names):
     # container_names is a dictionary, so we need to work with its keys
-    container_names_list = list(container_names.keys())  # Convert dict keys to a list
     while True:
         print("Menu: ")
         print("1. All Containers are sleeping")
@@ -148,8 +103,8 @@ def addContainerJob(container_names):
                 for i in range(len(containersWorking)):
                     start, end = containersWorking[i].split("-")
                     containersWorking[i] = [int(start), int(end)]
-                n = len(container_names_list) 
-                container_jobs = [[container_name, 0] for container_name in container_names_list]
+                n = len(container_names) 
+                container_jobs = [[container_name, 0] for container_name in container_names]
                 for start, end in containersWorking:
                     for index in range(start, end + 1):
                         if index - 1 < n:  # Adjust index to match the list index
@@ -158,51 +113,15 @@ def addContainerJob(container_names):
             case _:
                 print("Invalid choice. Please try again.")
 
-def get_or_create_namespace(namespace_name):
-    try:
-        v1.read_namespace(name=namespace_name)
-        print(f"Namespace '{namespace_name}' already exists.")
-    except client.exceptions.ApiException as e:
-        if e.status == 404:
-            v1.create_namespace(client.V1Namespace(metadata=client.V1ObjectMeta(name=namespace_name)))
-            print(f"Namespace '{namespace_name}' created.")
-        else:
-            raise
-
-def create_config_map(namespace, config_name, data):
+def create_config_map(v1, namespace, config_name, data):
     config_map = client.V1ConfigMap(
         metadata=client.V1ObjectMeta(name=config_name, namespace=namespace),
         data={"data": data}
     )
-    print(v1.create_namespaced_config_map(namespace=namespace, body=config_map))
+    v1.create_namespaced_config_map(namespace=namespace, body=config_map)
     print(f"ConfigMap '{config_name}' created in namespace '{namespace}'.")
 
-def create_redis_service(namespace):
-    service = V1Service(
-        metadata=V1ObjectMeta(name="redis-service", namespace=namespace),
-        spec=V1ServiceSpec(
-            selector={"app": "redis"},
-            ports=[V1ServicePort(port=6379, target_port=6379)]
-        )
-    )
-    v1.create_namespaced_service(namespace=namespace, body=service)
-    print(f"Redis Service created in namespace '{namespace}'.")
-
-def create_redis_deployment(namespace):
-    container = V1Container(
-        name="redis",
-        image="redis:latest",
-        ports=[client.V1ContainerPort(container_port=6379)]
-    )
-    pod_spec = V1PodSpec(containers=[container])
-    template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": "redis"}), spec=pod_spec)
-    spec = V1DeploymentSpec(replicas=1, template=template, selector=V1LabelSelector(match_labels={"app": "redis"}))
-    deployment = V1Deployment(metadata=V1ObjectMeta(name="redis-deployment", namespace=namespace), spec=spec)
-    
-    apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
-    print(f"Redis Deployment created in namespace '{namespace}'.")
-
-def create_logging_service(namespace):
+def create_logging_service(v1, namespace):
     service = V1Service(
         metadata=V1ObjectMeta(name="logging-service", namespace=namespace),
         spec=V1ServiceSpec(
@@ -213,13 +132,13 @@ def create_logging_service(namespace):
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Logging Service created in namespace '{namespace}'.")
 
-def create_logging_deployment(namespace, redis_ip):
+def create_logging_deployment(apps_v1, namespace, redis_ip):
     container = V1Container(
         name="logging-container",
         image=f"logging_capstone",
         env=[client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip)],
         ports=[client.V1ContainerPort(container_port=80)],
-        image_pull_policy="Never"  # Set the image pull policy to Never
+        image_pull_policy="IfNotPresent"  # Set the image pull policy to IfNotPresent
     )
     pod_spec = V1PodSpec(containers=[container])
     template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": "logging"}), spec=pod_spec)
@@ -229,8 +148,7 @@ def create_logging_deployment(namespace, redis_ip):
     apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
     print(f"Logging Deployment created in namespace '{namespace}'.")
 
-def create_container_deployment(namespace, container_name, config_map_name, redis_ip, container_job, replicas):
-    # Container with the job
+def create_container_deployment(apps_v1, namespace, container_name, config_map_name, redis_ip, container_job, replicas=1):
     container = V1Container(
         name=container_name,
         image=f"flask-contact-container",
@@ -241,7 +159,7 @@ def create_container_deployment(namespace, container_name, config_map_name, redi
             client.V1EnvVar(name="NAMESPACE", value=namespace)
         ],
         volume_mounts=[client.V1VolumeMount(mount_path="/app/calls.json", sub_path="data", name="config-volume")],
-        image_pull_policy="Never"
+        image_pull_policy="IfNotPresent"  # Set the image pull policy to IfNotPresent
     )
     
     # Config volume for the container
@@ -262,7 +180,7 @@ def create_container_deployment(namespace, container_name, config_map_name, redi
     apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
     print(f"Deployment '{container_name}' created in namespace '{namespace}' with {replicas} replicas.")
 
-def create_container_service(namespace, container_name, port_mappings):
+def create_container_service(v1, namespace, container_name, port_mappings):
     """
     Create a Kubernetes service with multiple port mappings.
     
@@ -288,48 +206,59 @@ def create_container_service(namespace, container_name, port_mappings):
     )
     
     # Create the service in the specified namespace
-    v1 = client.CoreV1Api()
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Service '{container_name}-service' created in namespace '{namespace}' with ports: {port_mappings}.")
 
 def main():
-    namespace = os.getenv("KUBERNETES_NAMESPACE", "static-application")
-    container_names_file = "containers_fake.json"
+    NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
+    KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "32092"))
+    container_names_file = "containers_fake.txt"
+    # Load the Kubernetes configuration
+    config.load_kube_config()
+
+    # Kubernetes API client
+    v1 = client.CoreV1Api()
+    apps_v1 = client.AppsV1Api()
+    rbac_v1 = client.RbacAuthorizationV1Api()
+
     
     # Ensure the namespace exists
-    get_or_create_namespace(namespace)
+    get_or_create_namespace(NAMESPACE)
+
+    # Setup Kafka environment
+    (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
     # Read container names and replicas from file and get renamed containers
-    containers, renamed_containers, calls = get_and_rename_containers()
+    orignal_container_with_replicas, renamed_containers, calls = get_and_rename_containers()
 
     # Create Redis deployment and service
-    create_redis_deployment(namespace)
-    create_redis_service(namespace)
-    wait_for_pods_ready(namespace)
-    
+    (redis_service_name, ) = deploy_redis_environment(NAMESPACE, v1, apps_v1)
+    wait_for_pods_ready(NAMESPACE)
+
     # Create Logging deployment and service
-    create_logging_deployment(namespace, redis_ip="redis-service")
-    create_logging_service(namespace)
-
-    # Create ConfigMap for each container's calls.json
-    for container_name in renamed_containers.values():
-        create_config_map(namespace, f"{container_name}-config", data=json.dumps(calls.get(container_name, {})))
-
-    # Create deployments for containers with replicas from JSON
-    container_jobs = addContainerJob(containers)
-    for original_container_name, container_job in container_jobs:
-        service_name = renamed_containers[original_container_name]  # Get the service name (s1, s2, etc.)
-        replicas = int(containers[original_container_name])  # Get replica count from the original containers dictionary
-        create_container_deployment(namespace, service_name, f"{service_name}-config", redis_ip="redis-service", container_job=container_job, replicas=replicas)
+    create_logging_deployment(apps_v1, NAMESPACE, redis_ip=redis_service_name)
+    create_logging_service(v1, NAMESPACE)
+    renamed_containers_names = renamed_containers.values()
     
-    # Create services for each container
-    for original_container_name in containers:
-        service_name = renamed_containers[original_container_name]  # Get the service name (s1, s2, etc.)
-        create_container_service(namespace, service_name, [{"port": 80, "target_port": 80}])
+    # Create ConfigMap for each container's calls.json
+    topics = []
+    for container_name in renamed_containers_names:
+        topics.append({ "name": container_name, "partitions": 1, "replication_factor": kafka_replicas })
+        create_config_map(v1, NAMESPACE, f"{container_name}-config", data=json.dumps(calls.get(container_name, {})))
+    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
-    print("All deployments and services are up and running in Kubernetes.")
-    wait_for_pods_ready(namespace)
-    port_forward_and_update_time(namespace, "redis-service", 60892, 6379)
+    # Create deployments for containers
+    container_jobs = addContainerJob(orignal_container_with_replicas.keys())
+    for container_name in renamed_containers_names:
+        create_container_service(v1, NAMESPACE, container_name, [{ "port": 80, "target_port": 80 }])
+    for original_container_name, container_job in container_jobs:
+        replicas = int(orignal_container_with_replicas[original_container_name])
+        renamed_container_name = renamed_containers[original_container_name]
+        create_container_deployment(apps_v1, NAMESPACE, renamed_container_name, f"{renamed_container_name}-config", redis_ip=redis_service_name, container_job=container_job, replicas=replicas)
+
+    wait_for_pods_ready(NAMESPACE)
+    print("All statefulsets, deployments and services are up in Kubernetes.")
+    port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
 
 if __name__ == "__main__":
     main()

@@ -15,7 +15,7 @@ def log_data():
     if not start_time:
         start_time = int(redis_client.get('start_time'))
     data = request.get_json()
-    print(f"[{data['timestamp']}] {data['dm']} received request from {data['um']}. Start time: {start_time}", file=sys.stderr)
+    print(f"[{data['timestamp']}] {data['dm']} received request from {data['um']} with communication_type {data['communication_type']}. Start time: {start_time}", file=sys.stderr)
     return jsonify({"message": "Data received"}), 200
 
 if __name__ == '__main__':
