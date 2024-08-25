@@ -8,6 +8,8 @@ import redis
 import sys
 from communication_type.http.flask_server import start_flask_process, make_http_call 
 from communication_type.kafka.kafka_related import produce_kafka_messages, start_kafka_consumer_process
+from communication_type.rpc.rpc_client import contact_rpc_server
+from communication_type.rpc.rpc_server import run_grpc_server_process
 
 CONTAINER_NAME = os.environ.get("CONTAINER_NAME")
 REDIS_IP = os.environ.get("REDIS_IP_ADDRESS")
@@ -37,13 +39,35 @@ def call_containers(containers, timestamp):
     for container in containers:
         dm_service = container['dm_service']
         communication_type = container['communication_type']
-        json_data = {**container, 'timestamp': timestamp, "um": CONTAINER_NAME}
+        json_data = {
+            'dm_service': dm_service, 
+            'communication_type': communication_type, 
+            'timestamp': str(timestamp), 
+            "um": CONTAINER_NAME
+            }
         print(f"sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
-        match communication_type:
-            case 'async':
-                produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data)
-            case _:
-                make_http_call(json_data)
+        try:
+            match communication_type:
+                case 'async':
+                    try:
+                        produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data)
+                        print("Successfully produced Kafka messages.")
+                    except Exception as e:
+                        print(f"Failed to produce Kafka messages: {e}")
+                case 'rpc':
+                    try:
+                        contact_rpc_server(json_data)
+                        print("Successfully contacted RPC server.")
+                    except Exception as e:
+                        print(f"Failed to contact RPC server: {e}")
+                case _:
+                    try:
+                        make_http_call(json_data)
+                        print("Successfully made HTTP call.")
+                    except Exception as e:
+                        print(f"Failed to make HTTP call: {e}")
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
 
 def sleep_according_to_call_list(calls_list, start_time):
     if calls_list:
@@ -112,6 +136,9 @@ def contact_containers(calls):
 
 if __name__ == "__main__":
     # Load the contact data from a JSON file
+    kafka_process = start_kafka_consumer_process(NAMESPACE, 'kafka-instance', 'kafka', f'{CONTAINER_NAME}-group', CONTAINER_NAME, CONTAINER_NAME)
+    flask_process = start_flask_process()
+    grpc_process = run_grpc_server_process()
     while True:
         print("Waiting for calls.json")
         if os.path.exists('calls.json'):
@@ -123,6 +150,4 @@ if __name__ == "__main__":
     print(calls)
     if calls:
         threading.Thread(target=contact_containers, args=(calls,)).start()
-    kafka_process = start_kafka_consumer_process(NAMESPACE, 'kafka-instance', 'kafka', f'{CONTAINER_NAME}-group', CONTAINER_NAME, CONTAINER_NAME)
-    flask_process = start_flask_process()
     

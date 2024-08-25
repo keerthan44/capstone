@@ -192,7 +192,8 @@ def create_container_service(v1, namespace, container_name, port_mappings):
     service_ports = [
         client.V1ServicePort(
             port=port_mapping['port'],       # Port that the service will expose
-            target_port=port_mapping['target_port']  # Port on the container to forward traffic to
+            target_port=port_mapping['target_port'],  # Port on the container to forward traffic to
+            name=port_mapping['name']
         ) for port_mapping in port_mappings
     ]
     
@@ -250,7 +251,7 @@ def main():
     # Create deployments for containers
     container_jobs = addContainerJob(orignal_container_with_replicas.keys())
     for container_name in renamed_containers_names:
-        create_container_service(v1, NAMESPACE, container_name, [{ "port": 80, "target_port": 80 }])
+        create_container_service(v1, NAMESPACE, container_name, [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
     for original_container_name, container_job in container_jobs:
         replicas = int(orignal_container_with_replicas[original_container_name])
         renamed_container_name = renamed_containers[original_container_name]
