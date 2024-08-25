@@ -1,13 +1,9 @@
 kubernetes
-
 Flask
-
 python-dotenv
-
 redis
-
 pandas
-
 requests
-
 confluent-kafka
+grpcio-tools
+grpcio

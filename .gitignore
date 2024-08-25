@@ -4,3 +4,4 @@ dummy
 /containers/containers*.txt
 **/.env
 !**/.sample.env
+**/__pycache__
