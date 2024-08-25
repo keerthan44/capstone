@@ -92,9 +92,9 @@ def addContainerJob(container_names):
         option = input("Enter your choice (1/2/3): ").strip()
         match option:
             case '1': 
-                return [[container_name, 0] for container_name in container_names_list]
+                return [[container_name, 0] for container_name in container_names]
             case '2': 
-                return [[container_name, 1] for container_name in container_names_list]
+                return [[container_name, 1] for container_name in container_names]
             case '3':
                 print("You can enter the containers that are working in ranges like 1-5, 7-10")
                 print("1-1(includes both 1 and 1), 1-4(includes 1, 2, 3, 4)")
@@ -259,6 +259,7 @@ def main():
     wait_for_pods_ready(NAMESPACE)
     print("All statefulsets, deployments and services are up in Kubernetes.")
     port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
+
 
 if __name__ == "__main__":
     main()
