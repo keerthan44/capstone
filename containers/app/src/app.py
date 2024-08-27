@@ -39,15 +39,17 @@ def get_containers_to_call(calls, timestamps):
         containers.extend(calls[str(tempTimeStamp)])
     return containers
 
-def call_containers(containers, timestamp):
+def call_containers(containers, timestamp, start_time):
     print(f"Time: {timestamp}", file=sys.stderr)
+    timestamp_actual = str(start_time // 1_000_000 + timestamp)
     for container in containers:
         dm_service = container['dm_service']
         communication_type = container['communication_type']
         json_data = {
+            'timestamp_actual': timestamp_actual,
             'dm_service': dm_service, 
             'communication_type': communication_type, 
-            'timestamp_sent': str(timestamp), 
+            'timestamp_sent': str(time.time_ns() // 1_000_000), 
             "um": CONTAINER_NAME
             }
         print(f"sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
@@ -104,7 +106,7 @@ def contact_containers(calls):
             print(timestamp, timestamps, file=sys.stderr)
             containers = get_containers_to_call(calls, timestamps)
             if containers:
-                call_containers(containers, timestamp)
+                call_containers(containers, timestamp, start_time)
             if sleep_according_to_call_list(calls_list, start_time) == 'not_slept':
                 break
 

@@ -1,4 +1,5 @@
 from concurrent import futures
+import time
 import grpc
 from .contact_grpc_pb2 import ContactResponse
 from .contact_grpc_pb2_grpc import LoggerServiceServicer, add_LoggerServiceServicer_to_server
@@ -7,15 +8,23 @@ from ..http.http_client import make_http_call_to_logging_server
 
 class LoggerService(LoggerServiceServicer):
     def ContactServer(self, request, context):
+        timestamp_received = str(time.time_ns() // 1_000_000)
         um = request.um
         dm = request.dm
-        timestamp = request.timestamp_sent
+        timestamp_sent = request.timestamp_sent
         communication_type = request.communication_type
-
+        log_data = {
+            'um': request.um,
+            'dm': request.dm,
+            'timestamp_sent': request.timestamp_sent,
+            'timestamp_actual': request.timestamp_actual,
+            'communication_type': request.communication_type,
+            'timestamp_received': timestamp_received
+        }
         try:
             # Forward the data to the HTTP function
-            print(f"Contacted {dm} with communication_type {communication_type} at {timestamp} from {um}")
-            make_http_call_to_logging_server(um, dm, timestamp, communication_type)
+            print(f"Contacted {dm} with communication_type {communication_type} at {timestamp_sent} from {um}")
+            make_http_call_to_logging_server(log_data)
             status = 'Success'
         except Exception as e:
             status = f'Failed: {str(e)}'

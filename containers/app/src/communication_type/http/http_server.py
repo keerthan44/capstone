@@ -1,3 +1,4 @@
+import time
 from flask import Flask, request, jsonify
 import os
 import multiprocessing
@@ -10,13 +11,12 @@ container_name = os.environ.get("CONTAINER_NAME")
 
 @app.route('/', methods=['POST'])
 def home():
+    timestamp_received = str(time.time_ns() // 1_000_000)
     data = request.get_json()
-    # log
-    dm = container_name
-    um = data['um']
-    timestamp_sent = data['timestamp_sent']
-    communication_type = data['communication_type']
-    make_http_call_to_logging_server(um, dm, timestamp_sent, communication_type)
+    data['dm'] = container_name
+    data['timestamp_received'] = timestamp_received
+    print(data)
+    make_http_call_to_logging_server(data)
     return jsonify({"status": "success"}), 200
 
 def start_flask_process():

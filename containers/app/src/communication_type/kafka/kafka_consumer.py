@@ -1,5 +1,6 @@
 import json
 import multiprocessing
+import time
 from confluent_kafka import Consumer
 import sys
 from ..http.http_client import make_http_call_to_logging_server
@@ -43,7 +44,7 @@ def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_servic
 
             if msg is None:
                 continue
-
+            timestamp_received = str(time.time_ns() // 1_000_000)
             if msg.error():
                 print(f"Error: {msg.error()}")
                 break
@@ -51,8 +52,12 @@ def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_servic
                 # Deserialize JSON message back into a dictionary
                 message_value = msg.value().decode('utf-8')
                 message_dict = json.loads(message_value)
-
-                make_http_call_to_logging_server(message_dict['um'], dm_name, message_dict['timestamp_sent'], message_dict['communication_type']) 
+                log_data = {
+                    **message_dict,
+                    'dm': dm_name,
+                    'timestamp_received': timestamp_received
+                }
+                make_http_call_to_logging_server(log_data) 
                 # Print or process the dictionary as needed
                 print(f"Received message: {message_dict}", file=sys.stderr)
 

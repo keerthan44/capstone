@@ -12,8 +12,9 @@ def contact_rpc_server(data):
         request = ContactRequest(
             um=data['um'],
             dm=data['dm_service'],
-            timestamp=data['timestamp_sent'],
-            communication_type=data['communication_type']
+            timestamp_sent=data['timestamp_sent'],
+            communication_type=data['communication_type'],
+            timestamp_actual=data['timestamp_actual']
         )
         
         # Call the gRPC method
