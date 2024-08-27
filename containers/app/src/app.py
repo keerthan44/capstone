@@ -47,7 +47,7 @@ def call_containers(containers, timestamp):
         json_data = {
             'dm_service': dm_service, 
             'communication_type': communication_type, 
-            'timestamp': str(timestamp), 
+            'timestamp_sent': str(timestamp), 
             "um": CONTAINER_NAME
             }
         print(f"sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)

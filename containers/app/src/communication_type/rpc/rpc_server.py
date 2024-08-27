@@ -9,7 +9,7 @@ class LoggerService(LoggerServiceServicer):
     def ContactServer(self, request, context):
         um = request.um
         dm = request.dm
-        timestamp = request.timestamp
+        timestamp = request.timestamp_sent
         communication_type = request.communication_type
 
         try:

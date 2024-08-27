@@ -52,7 +52,7 @@ def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_servic
                 message_value = msg.value().decode('utf-8')
                 message_dict = json.loads(message_value)
 
-                make_http_call_to_logging_server(message_dict['um'], dm_name, message_dict['timestamp'], message_dict['communication_type']) 
+                make_http_call_to_logging_server(message_dict['um'], dm_name, message_dict['timestamp_sent'], message_dict['communication_type']) 
                 # Print or process the dictionary as needed
                 print(f"Received message: {message_dict}", file=sys.stderr)
 

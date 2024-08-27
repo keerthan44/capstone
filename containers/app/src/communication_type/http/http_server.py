@@ -14,9 +14,9 @@ def home():
     # log
     dm = container_name
     um = data['um']
-    timestamp = data['timestamp']
+    timestamp_sent = data['timestamp_sent']
     communication_type = data['communication_type']
-    make_http_call_to_logging_server(um, dm, timestamp, communication_type)
+    make_http_call_to_logging_server(um, dm, timestamp_sent, communication_type)
     return jsonify({"status": "success"}), 200
 
 def start_flask_process():

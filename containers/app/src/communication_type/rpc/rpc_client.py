@@ -12,7 +12,7 @@ def contact_rpc_server(data):
         request = ContactRequest(
             um=data['um'],
             dm=data['dm_service'],
-            timestamp=data['timestamp'],
+            timestamp=data['timestamp_sent'],
             communication_type=data['communication_type']
         )
         

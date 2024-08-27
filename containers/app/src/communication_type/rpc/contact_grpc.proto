@@ -9,7 +9,7 @@ service LoggerService {
 message ContactRequest {
   string um = 1;
   string dm = 2;
-  string timestamp = 3;
+  string timestamp_sent = 3;
   string communication_type = 4;
 }
 

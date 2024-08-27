@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12\x63ontact_grpc.proto\x12\nhelloworld\"W\n\x0e\x43ontactRequest\x12\n\n\x02um\x18\x01 \x01(\t\x12\n\n\x02\x64m\x18\x02 \x01(\t\x12\x11\n\ttimestamp\x18\x03 \x01(\t\x12\x1a\n\x12\x63ommunication_type\x18\x04 \x01(\t\"!\n\x0f\x43ontactResponse\x12\x0e\n\x06status\x18\x01 \x01(\t2[\n\rLoggerService\x12J\n\rContactServer\x12\x1a.helloworld.ContactRequest\x1a\x1b.helloworld.ContactResponse\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12\x63ontact_grpc.proto\x12\nhelloworld\"\\\n\x0e\x43ontactRequest\x12\n\n\x02um\x18\x01 \x01(\t\x12\n\n\x02\x64m\x18\x02 \x01(\t\x12\x16\n\x0etimestamp_sent\x18\x03 \x01(\t\x12\x1a\n\x12\x63ommunication_type\x18\x04 \x01(\t\"!\n\x0f\x43ontactResponse\x12\x0e\n\x06status\x18\x01 \x01(\t2[\n\rLoggerService\x12J\n\rContactServer\x12\x1a.helloworld.ContactRequest\x1a\x1b.helloworld.ContactResponse\"\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,9 +32,9 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'contact_grpc_pb2', _globals
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_CONTACTREQUEST']._serialized_start=34
-  _globals['_CONTACTREQUEST']._serialized_end=121
-  _globals['_CONTACTRESPONSE']._serialized_start=123
-  _globals['_CONTACTRESPONSE']._serialized_end=156
-  _globals['_LOGGERSERVICE']._serialized_start=158
-  _globals['_LOGGERSERVICE']._serialized_end=249
+  _globals['_CONTACTREQUEST']._serialized_end=126
+  _globals['_CONTACTRESPONSE']._serialized_start=128
+  _globals['_CONTACTRESPONSE']._serialized_end=161
+  _globals['_LOGGERSERVICE']._serialized_start=163
+  _globals['_LOGGERSERVICE']._serialized_end=254
 # @@protoc_insertion_point(module_scope)
