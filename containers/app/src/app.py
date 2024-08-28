@@ -19,6 +19,7 @@ CONTAINER_NAME = os.environ.get("CONTAINER_NAME")
 REDIS_IP = os.environ.get("REDIS_IP_ADDRESS")
 CONTAINER_JOB = os.environ.get("CONTAINER_JOB")
 NAMESPACE = os.environ.get("NAMESPACE")
+KAFKA_REPLICAS = int(os.environ.get("KAFKA_REPLICAS"))
 
 redis_client = redis.StrictRedis(host=f'{REDIS_IP}', port=6379)
 start_time = ''
@@ -59,7 +60,7 @@ async def call_containers(containers, timestamp, start_time):
         print(f"Sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
         try:
             if communication_type == 'async':
-                tasks.append(asyncio.create_task(produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data)))
+                tasks.append(asyncio.create_task(produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data, KAFKA_REPLICAS)))
             elif communication_type == 'rpc':
                 tasks.append(asyncio.create_task(contact_rpc_server(json_data)))
             else:
@@ -139,7 +140,7 @@ async def contact_containers(calls):
 
 if __name__ == "__main__":
     # Load the contact data from a JSON file
-    kafka_process = start_kafka_consumer_process(NAMESPACE, 'kafka-instance', 'kafka', f'{CONTAINER_NAME}-group', CONTAINER_NAME, CONTAINER_NAME)
+    kafka_process = start_kafka_consumer_process(NAMESPACE, 'kafka-instance', 'kafka', f'{CONTAINER_NAME}-group', CONTAINER_NAME, CONTAINER_NAME, KAFKA_REPLICAS)
     flask_process = start_flask_process()
     grpc_process = run_grpc_server_process()
     while True:

@@ -1,10 +1,11 @@
 import json
 import asyncio
+import time
 from confluent_kafka import Producer
 import sys
 from .kafka_utils import get_kafka_brokers
 
-async def produce_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_service_name, topic, message):
+async def produce_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_service_name, topic, message, kafka_replicas):
     """
     Asynchronously produces a message to a Kafka topic.
 
@@ -15,7 +16,9 @@ async def produce_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_
         topic (str): Kafka topic to produce messages to.
         message (dict): Message to produce, given as a dictionary.
     """
-    bootstrap_servers = await get_kafka_brokers(kafka_namespace, kafka_statefulset_name, kafka_service_name)
+    print(time.time_ns(), message, '0')
+    bootstrap_servers = get_kafka_brokers(kafka_namespace, kafka_statefulset_name, kafka_replicas, kafka_service_name)
+    print(time.time_ns(), message, '1')
     if not bootstrap_servers:
         raise RuntimeError("No Kafka brokers found")
     

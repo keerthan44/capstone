@@ -7,7 +7,7 @@ import sys
 from ..http.http_client import make_http_call_to_logging_server
 from .kafka_utils import get_kafka_brokers
 
-async def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, auto_offset_reset='earliest', timeout=1.0):
+async def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, kafka_replicas, auto_offset_reset='earliest', timeout=1.0):
     """
     Consumes messages from a Kafka topic asynchronously.
 
@@ -20,7 +20,7 @@ async def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_
         auto_offset_reset (str): Offset reset policy ('earliest' or 'latest').
         timeout (float): Timeout for polling messages in seconds.
     """
-    bootstrap_servers = await get_kafka_brokers(kafka_namespace, kafka_statefulset_name, kafka_service_name)
+    bootstrap_servers = get_kafka_brokers(kafka_namespace, kafka_statefulset_name, kafka_replicas, kafka_service_name)
     if not bootstrap_servers:
         raise RuntimeError("No Kafka brokers found")
     
@@ -44,7 +44,6 @@ async def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_
             msg = consumer.poll(timeout=timeout)
 
             if msg is None:
-                await asyncio.sleep(timeout)  # Non-blocking wait
                 continue
             timestamp_received = str(time.time_ns() // 1_000_000)
             if msg.error():
@@ -70,7 +69,7 @@ async def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_
         # Close down the consumer cleanly
         consumer.close()
 
-def kafka_consumer_process(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, auto_offset_reset='latest', timeout=1.0):
+def kafka_consumer_process(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, kafka_replicas, auto_offset_reset='latest', timeout=1.0):
     """
     Wrapper function to run the Kafka consumer inside an asyncio event loop in a separate process.
 
@@ -91,12 +90,13 @@ def kafka_consumer_process(kafka_namespace, kafka_statefulset_name, kafka_servic
             group_id, 
             topic, 
             dm_name, 
+            kafka_replicas,
             auto_offset_reset, 
             timeout
         )
     )
 
-def start_kafka_consumer_process(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, auto_offset_reset='latest', timeout=1.0):
+def start_kafka_consumer_process(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, kafka_replicas, auto_offset_reset='latest', timeout=1.0):
     """
     Starts the Kafka consumer in a separate process.
 
@@ -112,7 +112,7 @@ def start_kafka_consumer_process(kafka_namespace, kafka_statefulset_name, kafka_
     # Start a new process to run the Kafka consumer asynchronously
     consumer_process = multiprocessing.Process(
         target=kafka_consumer_process,
-        args=(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, auto_offset_reset, timeout)
+        args=(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, kafka_replicas, auto_offset_reset, timeout)
     )
     consumer_process.start()
 

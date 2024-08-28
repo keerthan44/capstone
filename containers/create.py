@@ -148,7 +148,7 @@ def create_logging_deployment(apps_v1, namespace, redis_ip):
     apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
     print(f"Logging Deployment created in namespace '{namespace}'.")
 
-def create_container_deployment(apps_v1, namespace, container_name, config_map_name, redis_ip, container_job, replicas=1):
+def create_container_deployment(apps_v1, namespace, container_name, config_map_name, kafka_replicas, redis_ip, container_job, replicas=1):
     container = V1Container(
         name=container_name,
         image=f"flask-contact-container",
@@ -156,7 +156,8 @@ def create_container_deployment(apps_v1, namespace, container_name, config_map_n
             client.V1EnvVar(name="CONTAINER_NAME", value=container_name),
             client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip),
             client.V1EnvVar(name="CONTAINER_JOB", value=str(container_job)),
-            client.V1EnvVar(name="NAMESPACE", value=namespace)
+            client.V1EnvVar(name="NAMESPACE", value=namespace),
+            client.V1EnvVar(name="KAFKA_REPLICAS", value=str(kafka_replicas))
         ],
         volume_mounts=[client.V1VolumeMount(mount_path="/app/calls.json", sub_path="data", name="config-volume")],
         image_pull_policy="IfNotPresent"  # Set the image pull policy to IfNotPresent
@@ -255,7 +256,7 @@ def main():
     for original_container_name, container_job in container_jobs:
         replicas = int(orignal_container_with_replicas[original_container_name])
         renamed_container_name = renamed_containers[original_container_name]
-        create_container_deployment(apps_v1, NAMESPACE, renamed_container_name, f"{renamed_container_name}-config", redis_ip=redis_service_name, container_job=container_job, replicas=replicas)
+        create_container_deployment(apps_v1, NAMESPACE, renamed_container_name, f"{renamed_container_name}-config", kafka_replicas, redis_ip=redis_service_name, container_job=container_job, replicas=replicas)
 
     wait_for_pods_ready(NAMESPACE)
     print("All statefulsets, deployments and services are up in Kubernetes.")
