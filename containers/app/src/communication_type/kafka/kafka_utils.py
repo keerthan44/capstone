@@ -1,8 +1,9 @@
+import asyncio
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 import sys
 
-def get_kafka_brokers(namespace, kafka_statefulset_name, kafka_service_name='kafka'):
+async def get_kafka_brokers(namespace, kafka_statefulset_name, kafka_service_name='kafka'):
     """Retrieve Kafka broker addresses from the pods of a StatefulSet using the Kubernetes client library."""
     try:
         # Load the Kubernetes configuration
@@ -13,20 +14,18 @@ def get_kafka_brokers(namespace, kafka_statefulset_name, kafka_service_name='kaf
         apps_v1 = client.AppsV1Api()
         core_v1 = client.CoreV1Api()
         
-        # Read the StatefulSet object
-        statefulset = apps_v1.read_namespaced_stateful_set(
-            name=kafka_statefulset_name, 
-            namespace=namespace
-        )
+        # Read the StatefulSet object asynchronously
+        statefulset = await asyncio.to_thread(apps_v1.read_namespaced_stateful_set, 
+                                              name=kafka_statefulset_name, 
+                                              namespace=namespace)
         
         # Extract pod names from the StatefulSet label selector
         label_selector = ",".join([f"{k}={v}" for k, v in statefulset.spec.selector.match_labels.items()])
         
-        # Fetch the pods that belong to this StatefulSet
-        pods = core_v1.list_namespaced_pod(
-            namespace=namespace,
-            label_selector=label_selector
-        )
+        # Fetch the pods that belong to this StatefulSet asynchronously
+        pods = await asyncio.to_thread(core_v1.list_namespaced_pod, 
+                                       namespace=namespace, 
+                                       label_selector=label_selector)
         
         # Extract brokers (pod IPs or DNS names) from the pod information
         brokers = set()

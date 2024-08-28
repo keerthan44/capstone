@@ -1,11 +1,10 @@
-import requests
 import threading
 import time
 import json
-import docker
 import os
 import redis
 import sys
+import asyncio
 
 from communication_type.http.http_server import start_flask_process
 from communication_type.http.http_client import make_http_call
@@ -24,6 +23,7 @@ NAMESPACE = os.environ.get("NAMESPACE")
 redis_client = redis.StrictRedis(host=f'{REDIS_IP}', port=6379)
 start_time = ''
 
+
 def get_timestamp_to_call(start_time, calls_list):
     timestamp = (time.time_ns() - start_time) // 1_000_000   # Convert to milliseconds
     timestamps = []
@@ -33,15 +33,19 @@ def get_timestamp_to_call(start_time, calls_list):
         timestamps.append(calls_list.pop(0))
     return timestamp, timestamps
 
+
 def get_containers_to_call(calls, timestamps):
     containers = []
     for tempTimeStamp in timestamps:
         containers.extend(calls[str(tempTimeStamp)])
     return containers
 
-def call_containers(containers, timestamp, start_time):
+
+async def call_containers(containers, timestamp, start_time):
     print(f"Time: {timestamp}", file=sys.stderr)
     timestamp_actual = str(start_time // 1_000_000 + timestamp)
+    tasks = []
+
     for container in containers:
         dm_service = container['dm_service']
         communication_type = container['communication_type']
@@ -52,43 +56,34 @@ def call_containers(containers, timestamp, start_time):
             'timestamp_sent': str(time.time_ns() // 1_000_000), 
             "um": CONTAINER_NAME
             }
-        print(f"sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
+        print(f"Sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
         try:
-            match communication_type:
-                case 'async':
-                    try:
-                        produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data)
-                        print("Successfully produced Kafka messages.")
-                    except Exception as e:
-                        print(f"Failed to produce Kafka messages: {e}")
-                case 'rpc':
-                    try:
-                        contact_rpc_server(json_data)
-                        print("Successfully contacted RPC server.")
-                    except Exception as e:
-                        print(f"Failed to contact RPC server: {e}")
-                case _:
-                    try:
-                        make_http_call(json_data)
-                        print("Successfully made HTTP call.")
-                    except Exception as e:
-                        print(f"Failed to make HTTP call: {e}")
+            if communication_type == 'async':
+                tasks.append(asyncio.create_task(produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data)))
+            elif communication_type == 'rpc':
+                tasks.append(asyncio.create_task(contact_rpc_server(json_data)))
+            else:
+                tasks.append(asyncio.create_task(make_http_call(json_data)))
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
 
-def sleep_according_to_call_list(calls_list, start_time):
+    if tasks:
+        await asyncio.gather(*tasks)
+
+
+async def sleep_according_to_call_list(calls_list, start_time):
     if calls_list:
         sleep_time_sec = (calls_list[0] - (time.time_ns() - start_time) // 1_000_000) / 1_000
         if sleep_time_sec < 0:
-            time.sleep(0.00001)
+            await asyncio.sleep(0.00001)
         else:
-            time.sleep(sleep_time_sec)
+            await asyncio.sleep(sleep_time_sec)
         return 'slept'
     else:
         return 'not_slept'
 
 
-def contact_containers(calls):
+async def contact_containers(calls):
     calls_list = list(map(int, calls.keys()))
     calls_list.sort()
     print(calls_list, file=sys.stderr)
@@ -98,7 +93,7 @@ def contact_containers(calls):
             print("start_time found")
             start_time = int(redis_client.get('start_time'))
             break
-        time.sleep(0.000001)
+        await asyncio.sleep(0.000001)
     
     if CONTAINER_JOB == '0':
         while True:
@@ -106,8 +101,8 @@ def contact_containers(calls):
             print(timestamp, timestamps, file=sys.stderr)
             containers = get_containers_to_call(calls, timestamps)
             if containers:
-                call_containers(containers, timestamp, start_time)
-            if sleep_according_to_call_list(calls_list, start_time) == 'not_slept':
+                await call_containers(containers, timestamp, start_time)
+            if await sleep_according_to_call_list(calls_list, start_time) == 'not_slept':
                 break
 
     else:    
@@ -131,15 +126,16 @@ def contact_containers(calls):
                 stop_event.set()
                 bg_thread.join()
                 
-                call_containers(containers, timestamp)
+                await call_containers(containers, timestamp, start_time)
                 
                 # Reset the stop event and restart the background task
                 stop_event.clear()
                 bg_thread = threading.Thread(target=background_task)
                 bg_thread.start()
             
-            if sleep_according_to_call_list(calls_list, start_time) == 'not_slept':
+            if await sleep_according_to_call_list(calls_list, start_time) == 'not_slept':
                 break
+
 
 if __name__ == "__main__":
     # Load the contact data from a JSON file
@@ -156,5 +152,4 @@ if __name__ == "__main__":
         time.sleep(1)
     print(calls)
     if calls:
-        threading.Thread(target=contact_containers, args=(calls,)).start()
-    
+        asyncio.run(contact_containers(calls))

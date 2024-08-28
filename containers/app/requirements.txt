@@ -6,3 +6,5 @@ confluent_kafka
 kubernetes
 grpcio-tools
 grpcio
+aiohttp
+quart

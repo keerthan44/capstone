@@ -1,14 +1,15 @@
-import json
+import asyncio
 import multiprocessing
+import json
 import time
-from confluent_kafka import Consumer
+from confluent_kafka import Consumer, KafkaError
 import sys
 from ..http.http_client import make_http_call_to_logging_server
 from .kafka_utils import get_kafka_brokers
 
-def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, auto_offset_reset='earliest', timeout=1.0):
+async def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, auto_offset_reset='earliest', timeout=1.0):
     """
-    Consumes messages from a Kafka topic.
+    Consumes messages from a Kafka topic asynchronously.
 
     Args:
         kafka_namespace (str): The Kubernetes namespace where Kafka is deployed.
@@ -19,7 +20,7 @@ def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_servic
         auto_offset_reset (str): Offset reset policy ('earliest' or 'latest').
         timeout (float): Timeout for polling messages in seconds.
     """
-    bootstrap_servers = get_kafka_brokers(kafka_namespace, kafka_statefulset_name, kafka_service_name)
+    bootstrap_servers = await get_kafka_brokers(kafka_namespace, kafka_statefulset_name, kafka_service_name)
     if not bootstrap_servers:
         raise RuntimeError("No Kafka brokers found")
     
@@ -43,11 +44,15 @@ def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_servic
             msg = consumer.poll(timeout=timeout)
 
             if msg is None:
+                await asyncio.sleep(timeout)  # Non-blocking wait
                 continue
             timestamp_received = str(time.time_ns() // 1_000_000)
             if msg.error():
-                print(f"Error: {msg.error()}")
-                break
+                print(f"Error: {msg.error()}", file=sys.stderr)
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    continue
+                else:
+                    break
             else:
                 # Deserialize JSON message back into a dictionary
                 message_value = msg.value().decode('utf-8')
@@ -57,13 +62,39 @@ def consume_kafka_messages(kafka_namespace, kafka_statefulset_name, kafka_servic
                     'dm': dm_name,
                     'timestamp_received': timestamp_received
                 }
-                make_http_call_to_logging_server(log_data) 
+                await make_http_call_to_logging_server(log_data)  # Await the async call
                 # Print or process the dictionary as needed
                 print(f"Received message: {message_dict}", file=sys.stderr)
 
     finally:
         # Close down the consumer cleanly
         consumer.close()
+
+def kafka_consumer_process(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, auto_offset_reset='latest', timeout=1.0):
+    """
+    Wrapper function to run the Kafka consumer inside an asyncio event loop in a separate process.
+
+    Args:
+        kafka_namespace (str): The Kubernetes namespace where Kafka is deployed.
+        kafka_statefulset_name (str): The name of the Kafka StatefulSet.
+        kafka_service_name (str): The name of the Kafka service.
+        group_id (str): Consumer group ID.
+        topic (str): Kafka topic to consume messages from.
+        auto_offset_reset (str): Offset reset policy ('earliest' or 'latest').
+        timeout (float): Timeout for polling messages in seconds.
+    """
+    asyncio.run(
+        consume_kafka_messages(
+            kafka_namespace, 
+            kafka_statefulset_name, 
+            kafka_service_name, 
+            group_id, 
+            topic, 
+            dm_name, 
+            auto_offset_reset, 
+            timeout
+        )
+    )
 
 def start_kafka_consumer_process(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, auto_offset_reset='latest', timeout=1.0):
     """
@@ -78,9 +109,9 @@ def start_kafka_consumer_process(kafka_namespace, kafka_statefulset_name, kafka_
         auto_offset_reset (str): Offset reset policy ('earliest' or 'latest').
         timeout (float): Timeout for polling messages in seconds.
     """
-    # Start a new process to run the Kafka consumer
+    # Start a new process to run the Kafka consumer asynchronously
     consumer_process = multiprocessing.Process(
-        target=consume_kafka_messages,
+        target=kafka_consumer_process,
         args=(kafka_namespace, kafka_statefulset_name, kafka_service_name, group_id, topic, dm_name, auto_offset_reset, timeout)
     )
     consumer_process.start()

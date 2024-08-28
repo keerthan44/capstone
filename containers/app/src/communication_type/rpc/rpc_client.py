@@ -2,10 +2,11 @@ import grpc
 from .contact_grpc_pb2_grpc import LoggerServiceStub
 from .contact_grpc_pb2 import ContactRequest
 import argparse
+import asyncio
 
-def contact_rpc_server(data):
-    print(data)
-    with grpc.insecure_channel(f"{data['dm_service']}-service:50051") as channel:
+async def contact_rpc_server(data):
+    # Create an asynchronous gRPC channel
+    async with grpc.aio.insecure_channel(f"{data['dm_service']}-service:50051") as channel:
         stub = LoggerServiceStub(channel)
         
         # Create a request message
@@ -17,11 +18,11 @@ def contact_rpc_server(data):
             timestamp_actual=data['timestamp_actual']
         )
         
-        # Call the gRPC method
-        response = stub.ContactServer(request)
+        # Asynchronously call the gRPC method
+        response = await stub.ContactServer(request)
         print(f"Server response: {response.status}")
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description='Contact gRPC server with specified parameters.')
     
     # Define default values for arguments
@@ -37,12 +38,12 @@ def main():
     data = {
         'ip_address': args.ip_address,
         'um': args.um,
-        'dm': args.dm,
-        'timestamp': args.timestamp,
+        'dm_service': args.dm,
+        'timestamp_sent': args.timestamp,
         'communication_type': args.communication_type
     }
 
-    contact_rpc_server(data)
+    await contact_rpc_server(data)
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
