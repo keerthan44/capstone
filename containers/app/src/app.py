@@ -59,12 +59,13 @@ async def call_containers(containers, timestamp, start_time):
             }
         print(f"Sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
         try:
-            if communication_type == 'async':
-                tasks.append(asyncio.create_task(produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data, KAFKA_REPLICAS)))
-            elif communication_type == 'rpc':
-                tasks.append(asyncio.create_task(contact_rpc_server(json_data)))
-            else:
-                tasks.append(asyncio.create_task(make_http_call(json_data)))
+            match communication_type:
+                case 'async':
+                    tasks.append(asyncio.create_task(produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data, KAFKA_REPLICAS)))
+                case 'rpc':
+                    tasks.append(asyncio.create_task(contact_rpc_server(json_data)))
+                case _:
+                    tasks.append(asyncio.create_task(make_http_call(json_data)))
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
 
