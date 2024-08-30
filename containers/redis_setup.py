@@ -22,7 +22,7 @@ def create_redis_service(v1, namespace):
         spec=V1ServiceSpec(
             selector={"app": "redis"},
             ports=[V1ServicePort(port=6379, target_port=6379)]
-        )
+        ),
     )
     response = v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Redis Service created in namespace '{namespace}'.")
@@ -32,7 +32,8 @@ def create_redis_deployment(apps_v1, namespace):
     container = V1Container(
         name="redis",
         image="redis:latest",
-        ports=[client.V1ContainerPort(container_port=6379)]
+        ports=[client.V1ContainerPort(container_port=6379)],
+        image_pull_policy="IfNotPresent",
     )
     pod_spec = V1PodSpec(containers=[container])
     template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": "redis"}), spec=pod_spec)

@@ -23,6 +23,7 @@ def create_zookeeper_statefulset(apps_v1, namespace):
         name="zoo1-instance",
         image="wurstmeister/zookeeper",
         ports=[V1ContainerPort(container_port=2181)],
+        image_pull_policy="IfNotPresent",  # Set the image pull policy to IfNotPresent
     )
     statefulset = V1StatefulSet(
         metadata=V1ObjectMeta(name="zoo1-instance", namespace=namespace, labels={"service": "zoo1-instance"}),
@@ -65,6 +66,7 @@ def create_kafka_statefulset(apps_v1, namespace):
     container = V1Container(
         name="kafka-instance",
         image="wurstmeister/kafka",
+        image_pull_policy="IfNotPresent",  # Set the image pull policy to IfNotPresent
         ports=[
             V1ContainerPort(container_port=9092),
             V1ContainerPort(container_port=9093)

@@ -16,8 +16,8 @@ dockerUsername = os.getenv("DOCKER_USERNAME")
 # Function to read container names from a file
 def read_container_names(file_path):
     with open(file_path, 'r') as file:
-        containers_data = json.load(file)
-        return {entry['msName']: entry['replicas'] for entry in containers_data}
+        return json.load(file)
+        # return {entry['msName']: entry['replicas'] for entry in containers_data}
 
 def get_and_rename_containers(containersFile="containers_fake.json", callsFile="calls.json"):
     mappedContainersFile = containersFile.split(".")[0] + "_mapped.json"
@@ -41,19 +41,19 @@ def get_and_rename_containers(containersFile="containers_fake.json", callsFile="
                         print(f"Warning: {dm_service} not found in renamed_containers. Skipping.")
                         continue
                     # Rename the dm_service field
-                    calls[um][timestamp][i]['dm_service'] = renamed_containers[dm_service]
+                    calls[um][timestamp][i]['dm_service'] = renamed_containers[dm_service]["mappedName"]
             if um in renamed_containers:
-                calls[renamed_containers[um]] = calls.pop(um)
+                calls[renamed_containers[um]['mappedName']] = calls.pop(um)
             else:
                 print(f"Warning: {um} not found in renamed_containers. Skipping.")
         
         # Write the renamed calls to a new mapped file
         with open(callsFile.split(".")[0] + "_mapped.json", "w") as f:
             json.dump(calls, f, indent=4)
-        return containers, renamed_containers, calls  # Return containers, renamed_containers, and calls
+        return renamed_containers, calls  # Return containers, renamed_containers, and calls
     
     # If mapped containers file doesn't exist, proceed with renaming
-    renamed_containers = {container: f"s{i}" for i, container in enumerate(containers.keys(), 1)}
+    renamed_containers = {container['msName']: {"mappedName" : f"s{i}", "containerIndex": i, **container} for i, container in enumerate(containers, 1)}
     
     with open(callsFile) as f:
         calls = json.load(f)
@@ -66,9 +66,9 @@ def get_and_rename_containers(containersFile="containers_fake.json", callsFile="
                     print(f"Warning: {dm_service} not found in renamed_containers. Skipping.")
                     continue
                 # Rename the dm_service field
-                calls[um][timestamp][i]['dm_service'] = renamed_containers[dm_service]
+                calls[um][timestamp][i]['dm_service'] = renamed_containers[dm_service]["mappedName"]
         if um in renamed_containers:
-            calls[renamed_containers[um]] = calls.pop(um)
+            calls[renamed_containers[um]['mappedName']] = calls.pop(um)
         else:
             print(f"Warning: {um} not found in renamed_containers. Skipping.")
     
@@ -80,9 +80,9 @@ def get_and_rename_containers(containersFile="containers_fake.json", callsFile="
     with open(mappedContainersFile, 'w') as f:
         json.dump(renamed_containers, f, indent=4)
 
-    return containers, renamed_containers, calls  # Return containers, renamed_containers, and calls
+    return renamed_containers, calls  # Return containers, renamed_containers, and calls
 
-def addContainerJob(container_names):
+def addContainerJob(containers):
     # container_names is a dictionary, so we need to work with its keys
     while True:
         print("Menu: ")
@@ -92,9 +92,9 @@ def addContainerJob(container_names):
         option = input("Enter your choice (1/2/3): ").strip()
         match option:
             case '1': 
-                return [[container_name, 0] for container_name in container_names]
+                return {container: {**containers[container], "containerJob": 0} for container in containers}
             case '2': 
-                return [[container_name, 1] for container_name in container_names]
+                return {container: {**containers[container], "containerJob": 1} for container in containers}
             case '3':
                 print("You can enter the containers that are working in ranges like 1-5, 7-10")
                 print("1-1(includes both 1 and 1), 1-4(includes 1, 2, 3, 4)")
@@ -103,13 +103,16 @@ def addContainerJob(container_names):
                 for i in range(len(containersWorking)):
                     start, end = containersWorking[i].split("-")
                     containersWorking[i] = [int(start), int(end)]
-                n = len(container_names) 
-                container_jobs = [[container_name, 0] for container_name in container_names]
-                for start, end in containersWorking:
-                    for index in range(start, end + 1):
-                        if index - 1 < n:  # Adjust index to match the list index
-                            container_jobs[index - 1][1] = 1  # Subtract 1 to get the correct list index
-                return container_jobs
+                for container in containers:
+                    addedJob = False
+                    for workingRange in containersWorking:
+                        if workingRange[0] <= containers[container]['containerIndex'] <= workingRange[1]:
+                            addedJob = True
+                            containers[container]["containerJob"] = 1
+                            break
+                    if not addedJob:
+                        containers[container]["containerJob"] = 0
+                return containers 
             case _:
                 print("Invalid choice. Please try again.")
 
@@ -231,7 +234,7 @@ def main():
     (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
     # Read container names and replicas from file and get renamed containers
-    orignal_container_with_replicas, renamed_containers, calls = get_and_rename_containers()
+    renamed_containers, calls = get_and_rename_containers()
 
     # Create Redis deployment and service
     (redis_service_name, ) = deploy_redis_environment(NAMESPACE, v1, apps_v1)
@@ -240,23 +243,26 @@ def main():
     # Create Logging deployment and service
     create_logging_deployment(apps_v1, NAMESPACE, redis_ip=redis_service_name)
     create_logging_service(v1, NAMESPACE)
-    renamed_containers_names = renamed_containers.values()
     
     # Create ConfigMap for each container's calls.json
     topics = []
-    for container_name in renamed_containers_names:
-        topics.append({ "name": container_name, "partitions": 1, "replication_factor": kafka_replicas })
-        create_config_map(v1, NAMESPACE, f"{container_name}-config", data=json.dumps(calls.get(container_name, {})))
+    for container in renamed_containers:
+        containerKeys = renamed_containers[container]
+        mappedName = containerKeys['mappedName']
+        topics.append({ "name": mappedName, "partitions": 1, "replication_factor": kafka_replicas })
+        create_config_map(v1, NAMESPACE, f"{mappedName}-config", data=json.dumps(calls.get(mappedName, {})))
     create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
     # Create deployments for containers
-    container_jobs = addContainerJob(orignal_container_with_replicas.keys())
-    for container_name in renamed_containers_names:
-        create_container_service(v1, NAMESPACE, container_name, [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
-    for original_container_name, container_job in container_jobs:
-        replicas = int(orignal_container_with_replicas[original_container_name])
-        renamed_container_name = renamed_containers[original_container_name]
-        create_container_deployment(apps_v1, NAMESPACE, renamed_container_name, f"{renamed_container_name}-config", kafka_replicas, redis_ip=redis_service_name, container_job=container_job, replicas=replicas)
+    renamed_containers = addContainerJob(renamed_containers)
+    for container_name in renamed_containers:
+        create_container_service(v1, NAMESPACE, renamed_containers[container_name]['mappedName'], [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
+    for container in renamed_containers:
+        containerKeys = renamed_containers[container]
+        mappedName = containerKeys['mappedName']
+        replicas = containerKeys['replicas']
+        containerJob = containerKeys['containerJob']
+        create_container_deployment(apps_v1, NAMESPACE, mappedName, f"{mappedName}-config", kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
 
     wait_for_pods_ready(NAMESPACE)
     print("All statefulsets, deployments and services are up in Kubernetes.")
