@@ -40,9 +40,13 @@ async def start_grpc_server():
     print("GRPC Server started on port 50051.")
     await server.wait_for_termination()
 
+def run_grpc_server():
+    # Start the event loop and run the gRPC server
+    asyncio.run(start_grpc_server())
+
 def run_grpc_server_process():
     # Create a new process to run the gRPC server
-    process = Process(target=asyncio.run, args=(start_grpc_server(),))
+    process = Process(target=run_grpc_server)
     process.start()
     return process
 

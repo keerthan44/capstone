@@ -96,7 +96,6 @@ async def contact_containers(calls):
             start_time = int(redis_client.get('start_time'))
             break
         await asyncio.sleep(0.000001)
-    
     if CONTAINER_JOB == '0':
         while True:
             timestamp, timestamps = get_timestamp_to_call(start_time, calls_list)
@@ -153,5 +152,4 @@ if __name__ == "__main__":
             break
         time.sleep(1)
     print(calls)
-    if calls:
-        asyncio.run(contact_containers(calls))
+    asyncio.run(contact_containers(calls))
