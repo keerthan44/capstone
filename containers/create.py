@@ -2,30 +2,24 @@ import os
 import json
 from kubernetes import client, config
 from kubernetes.client import V1Pod, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1Deployment, V1DeploymentSpec, V1PodTemplateSpec, V1LabelSelector, V1Ingress, V1IngressSpec, V1IngressRule, V1IngressBackend
-from kafka_setup import  deploy_kafka_environment, create_topics_http_request
-from utils import wait_for_pods_ready, port_forward_and_exec_func,  get_or_create_namespace   
-
+from kafka_setup import deploy_kafka_environment, create_topics_http_request
+from utils import wait_for_pods_ready, port_forward_and_exec_func, get_or_create_namespace   
 from dotenv import load_dotenv
 from redis_setup import deploy_redis_environment, set_start_time_redis
 
 load_dotenv()  # take environment variables from .env.
 
-
 dockerUsername = os.getenv("DOCKER_USERNAME")
 
-# Function to read container names from a file
 def read_container_names(file_path):
     with open(file_path, 'r') as file:
         return json.load(file)
-        # return {entry['msName']: entry['replicas'] for entry in containers_data}
 
 def get_and_rename_containers(containersFile="containers_fake.json", callsFile="calls.json"):
     mappedContainersFile = containersFile.split(".")[0] + "_mapped.json"
     
-    # Load the original containers to maintain replica counts
     containers = read_container_names(containersFile)
     
-    # Check if the mapped containers file already exists
     if os.path.isfile(mappedContainersFile):
         with open(mappedContainersFile) as f:
             renamed_containers = json.load(f)
@@ -40,19 +34,16 @@ def get_and_rename_containers(containersFile="containers_fake.json", callsFile="
                     if dm_service not in renamed_containers:
                         print(f"Warning: {dm_service} not found in renamed_containers. Skipping.")
                         continue
-                    # Rename the dm_service field
                     calls[um][timestamp][i]['dm_service'] = renamed_containers[dm_service]["mappedName"]
             if um in renamed_containers:
                 calls[renamed_containers[um]['mappedName']] = calls.pop(um)
             else:
                 print(f"Warning: {um} not found in renamed_containers. Skipping.")
         
-        # Write the renamed calls to a new mapped file
         with open(callsFile.split(".")[0] + "_mapped.json", "w") as f:
             json.dump(calls, f, indent=4)
-        return renamed_containers, calls  # Return containers, renamed_containers, and calls
+        return renamed_containers, calls
     
-    # If mapped containers file doesn't exist, proceed with renaming
     renamed_containers = {container['msName']: {"mappedName" : f"s{i}", "containerIndex": i, **container} for i, container in enumerate(containers, 1)}
     
     with open(callsFile) as f:
@@ -65,25 +56,21 @@ def get_and_rename_containers(containersFile="containers_fake.json", callsFile="
                 if dm_service not in renamed_containers:
                     print(f"Warning: {dm_service} not found in renamed_containers. Skipping.")
                     continue
-                # Rename the dm_service field
                 calls[um][timestamp][i]['dm_service'] = renamed_containers[dm_service]["mappedName"]
         if um in renamed_containers:
             calls[renamed_containers[um]['mappedName']] = calls.pop(um)
         else:
             print(f"Warning: {um} not found in renamed_containers. Skipping.")
     
-    # Write the renamed calls to a new mapped file
     with open(callsFile.split(".")[0] + "_mapped.json", "w") as f:
         json.dump(calls, f, indent=4)
     
-    # Save the renamed containers to a file for future reference
     with open(mappedContainersFile, 'w') as f:
         json.dump(renamed_containers, f, indent=4)
 
-    return renamed_containers, calls  # Return containers, renamed_containers, and calls
+    return renamed_containers, calls
 
 def addContainerJob(containers):
-    # container_names is a dictionary, so we need to work with its keys
     while True:
         print("Menu: ")
         print("1. All Containers are sleeping")
@@ -141,7 +128,7 @@ def create_logging_deployment(apps_v1, namespace, redis_ip):
         image=f"logging_capstone",
         env=[client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip)],
         ports=[client.V1ContainerPort(container_port=80)],
-        image_pull_policy="IfNotPresent"  # Set the image pull policy to IfNotPresent
+        image_pull_policy="IfNotPresent"
     )
     pod_spec = V1PodSpec(containers=[container])
     template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": "logging"}), spec=pod_spec)
@@ -163,54 +150,40 @@ def create_container_deployment(apps_v1, namespace, container_name, config_map_n
             client.V1EnvVar(name="KAFKA_REPLICAS", value=str(kafka_replicas))
         ],
         volume_mounts=[client.V1VolumeMount(mount_path="/app/calls.json", sub_path="data", name="config-volume")],
-        image_pull_policy="IfNotPresent"  # Set the image pull policy to IfNotPresent
+        image_pull_policy="IfNotPresent"
     )
     
-    # Config volume for the container
     volume = client.V1Volume(
         name="config-volume",
         config_map=client.V1ConfigMapVolumeSource(name=config_map_name)
     )
 
-    # Pod specification
     pod_spec = V1PodSpec(containers=[container], volumes=[volume])
     template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": container_name}), spec=pod_spec)
 
-    # Deployment with the replica count from JSON
     spec = V1DeploymentSpec(replicas=replicas, template=template, selector=V1LabelSelector(match_labels={"app": container_name}))
     deployment = V1Deployment(metadata=V1ObjectMeta(name=f"{container_name}-deployment", namespace=namespace), spec=spec)
     
-    # Create deployment in the namespace
     apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
     print(f"Deployment '{container_name}' created in namespace '{namespace}' with {replicas} replicas.")
 
 def create_container_service(v1, namespace, container_name, port_mappings):
-    """
-    Create a Kubernetes service with multiple port mappings.
-    
-    :param namespace: Namespace where the service will be created
-    :param container_name: Name of the container (used for naming the service and matching labels)
-    :param port_mappings: List of tuples where each tuple contains (port, target_port)
-    """
-    # Create a list of V1ServicePort objects from the port mappings
     service_ports = [
         client.V1ServicePort(
-            port=port_mapping['port'],       # Port that the service will expose
-            target_port=port_mapping['target_port'],  # Port on the container to forward traffic to
+            port=port_mapping['port'],
+            target_port=port_mapping['target_port'],
             name=port_mapping['name']
         ) for port_mapping in port_mappings
     ]
     
-    # Create a service object
     service = client.V1Service(
         metadata=client.V1ObjectMeta(name=f"{container_name}-service", namespace=namespace),
         spec=client.V1ServiceSpec(
-            selector={"app": container_name},  # Must match labels of the deployment pods
+            selector={"app": container_name},
             ports=service_ports
         )
     )
     
-    # Create the service in the specified namespace
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Service '{container_name}-service' created in namespace '{namespace}' with ports: {port_mappings}.")
 
@@ -218,56 +191,55 @@ def main():
     NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
     KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "32092"))
     container_names_file = "containers_fake.txt"
-    # Load the Kubernetes configuration
     config.load_kube_config()
 
-    # Kubernetes API client
     v1 = client.CoreV1Api()
     apps_v1 = client.AppsV1Api()
     rbac_v1 = client.RbacAuthorizationV1Api()
 
-    
-    # Ensure the namespace exists
     get_or_create_namespace(NAMESPACE)
 
-    # Setup Kafka environment
     (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
-    # Read container names and replicas from file and get renamed containers
     renamed_containers, calls = get_and_rename_containers()
 
-    # Create Redis deployment and service
     (redis_service_name, ) = deploy_redis_environment(NAMESPACE, v1, apps_v1)
     wait_for_pods_ready(NAMESPACE)
 
-    # Create Logging deployment and service
     create_logging_deployment(apps_v1, NAMESPACE, redis_ip=redis_service_name)
     create_logging_service(v1, NAMESPACE)
     
-    # Create ConfigMap for each container's calls.json
     topics = []
     for container in renamed_containers:
         containerKeys = renamed_containers[container]
         mappedName = containerKeys['mappedName']
         topics.append({ "name": mappedName, "partitions": 1, "replication_factor": kafka_replicas })
-        create_config_map(v1, NAMESPACE, f"{mappedName}-config", data=json.dumps(calls.get(mappedName, {})))
+        
+        # Create a unique ConfigMap for each replica
+        for i in range(containerKeys['replicas']):
+            config_map_name = f"{mappedName}-config-{i}"
+            create_config_map(v1, NAMESPACE, config_map_name, data=json.dumps(calls.get(mappedName, {})))
+    
     create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
-    # Create deployments for containers
     renamed_containers = addContainerJob(renamed_containers)
     for container_name in renamed_containers:
-        create_container_service(v1, NAMESPACE, renamed_containers[container_name]['mappedName'], [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
-    for container in renamed_containers:
-        containerKeys = renamed_containers[container]
+        containerKeys = renamed_containers[container_name]
         mappedName = containerKeys['mappedName']
-        replicas = containerKeys['replicas']
         containerJob = containerKeys['containerJob']
-        create_container_deployment(apps_v1, NAMESPACE, mappedName, f"{mappedName}-config", kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
+        replicas = containerKeys['replicas']
+        
+        # Create services for each container
+        create_container_service(v1, NAMESPACE, mappedName, [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
+        
+        # Create deployments for each replica
+        for i in range(replicas):
+            config_map_name = f"{mappedName}-config-{i}"
+            create_container_deployment(apps_v1, NAMESPACE, mappedName, config_map_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=1)
 
     wait_for_pods_ready(NAMESPACE)
     print("All statefulsets, deployments and services are up in Kubernetes.")
     port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
-
 
 if __name__ == "__main__":
     main()
