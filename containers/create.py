@@ -1,7 +1,7 @@
 import os
 import json
 from kubernetes import client, config
-from kubernetes.client import V1Pod, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1Deployment, V1DeploymentSpec, V1PodTemplateSpec, V1LabelSelector, V1Ingress, V1IngressSpec, V1IngressRule, V1IngressBackend
+from kubernetes.client import V1Deployment, V1DeploymentSpec, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1LabelSelector, V1Volume, V1ConfigMapVolumeSource, V1VolumeMount
 from kafka_setup import deploy_kafka_environment, create_topics_http_request
 from utils import wait_for_pods_ready, port_forward_and_exec_func, get_or_create_namespace   
 from dotenv import load_dotenv
@@ -15,7 +15,7 @@ def read_container_names(file_path):
     with open(file_path, 'r') as file:
         return json.load(file)
 
-def get_and_rename_containers(containersFile="containers_fake.json", callsFile="calls.json"):
+def get_and_rename_containers(containersFile="containers.json", callsFile="calls.json"):
     mappedContainersFile = containersFile.split(".")[0] + "_mapped.json"
     
     containers = read_container_names(containersFile)
@@ -138,7 +138,7 @@ def create_logging_deployment(apps_v1, namespace, redis_ip):
     apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
     print(f"Logging Deployment created in namespace '{namespace}'.")
 
-def create_container_deployment(apps_v1, namespace, container_name, config_map_name, kafka_replicas, redis_ip, container_job, replicas=1):
+def create_container_statefulset(apps_v1, namespace, container_name, config_map_name, kafka_replicas, redis_ip, container_job, replicas=1):
     container = V1Container(
         name=container_name,
         image=f"flask-contact-container",
@@ -147,7 +147,9 @@ def create_container_deployment(apps_v1, namespace, container_name, config_map_n
             client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip),
             client.V1EnvVar(name="CONTAINER_JOB", value=str(container_job)),
             client.V1EnvVar(name="NAMESPACE", value=namespace),
-            client.V1EnvVar(name="KAFKA_REPLICAS", value=str(kafka_replicas))
+            client.V1EnvVar(name="KAFKA_REPLICAS", value=str(kafka_replicas)),
+            client.V1EnvVar(name="POD_NAME", value_from=client.V1EnvVarSource(field_ref=client.V1ObjectFieldSelector(field_path="metadata.name"))),
+
         ],
         volume_mounts=[client.V1VolumeMount(mount_path="/app/calls.json", sub_path="data", name="config-volume")],
         image_pull_policy="IfNotPresent"
@@ -161,11 +163,31 @@ def create_container_deployment(apps_v1, namespace, container_name, config_map_n
     pod_spec = V1PodSpec(containers=[container], volumes=[volume])
     template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": container_name}), spec=pod_spec)
 
-    spec = V1DeploymentSpec(replicas=replicas, template=template, selector=V1LabelSelector(match_labels={"app": container_name}))
-    deployment = V1Deployment(metadata=V1ObjectMeta(name=f"{container_name}-deployment", namespace=namespace), spec=spec)
+    stateful_set_spec = V1StatefulSetSpec(
+        service_name=f"{container_name}-service",
+        replicas=replicas,
+        selector=V1LabelSelector(match_labels={"app": container_name}),
+        template=template,
+        volume_claim_templates=[client.V1PersistentVolumeClaim(
+            metadata=client.V1ObjectMeta(name=f"{container_name}-data"),
+            spec=client.V1PersistentVolumeClaimSpec(
+                access_modes=["ReadWriteOnce"],
+                resources=client.V1ResourceRequirements(
+                    requests={"storage": "1Gi"}
+                )
+            )
+        )],
+        pod_management_policy="OrderedReady",
+        update_strategy=client.V1StatefulSetUpdateStrategy(type="RollingUpdate")
+    )
+
+    stateful_set = V1StatefulSet(
+        metadata=V1ObjectMeta(name=f"{container_name}-statefulset", namespace=namespace),
+        spec=stateful_set_spec
+    )
     
-    apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
-    print(f"Deployment '{container_name}' created in namespace '{namespace}' with {replicas} replicas.")
+    apps_v1.create_namespaced_stateful_set(namespace=namespace, body=stateful_set)
+    print(f"StatefulSet '{container_name}-statefulset' created in namespace '{namespace}' with {replicas} replicas.")
 
 def create_container_service(v1, namespace, container_name, port_mappings):
     service_ports = [
@@ -186,6 +208,9 @@ def create_container_service(v1, namespace, container_name, port_mappings):
     
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Service '{container_name}-service' created in namespace '{namespace}' with ports: {port_mappings}.")
+
+def split_calls_to_replicas(data, replicas, mappedName):
+    return {f"{mappedName}-statefulset-{str(i)}": data for i in range(replicas)}
 
 def main():
     NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
@@ -213,12 +238,12 @@ def main():
     for container in renamed_containers:
         containerKeys = renamed_containers[container]
         mappedName = containerKeys['mappedName']
+        replicas = containerKeys['replicas']
         topics.append({ "name": mappedName, "partitions": 1, "replication_factor": kafka_replicas })
         
-        # Create a unique ConfigMap for each replica
-        for i in range(containerKeys['replicas']):
-            config_map_name = f"{mappedName}-config-{i}"
-            create_config_map(v1, NAMESPACE, config_map_name, data=json.dumps(calls.get(mappedName, {})))
+        config_map_name = f"{mappedName}-config"
+        data = split_calls_to_replicas(calls.get(mappedName, {}), replicas, mappedName)
+        create_config_map(v1, NAMESPACE, config_map_name, data=json.dumps(data))
     
     create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
@@ -232,10 +257,8 @@ def main():
         # Create services for each container
         create_container_service(v1, NAMESPACE, mappedName, [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
         
-        # Create deployments for each replica
-        for i in range(replicas):
-            config_map_name = f"{mappedName}-config-{i}"
-            create_container_deployment(apps_v1, NAMESPACE, mappedName, config_map_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=1)
+        config_map_name = f"{mappedName}-config"
+        create_container_statefulset(apps_v1, NAMESPACE, mappedName, config_map_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
 
     wait_for_pods_ready(NAMESPACE)
     print("All statefulsets, deployments and services are up in Kubernetes.")

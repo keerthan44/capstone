@@ -20,6 +20,7 @@ REDIS_IP = os.environ.get("REDIS_IP_ADDRESS")
 CONTAINER_JOB = os.environ.get("CONTAINER_JOB")
 NAMESPACE = os.environ.get("NAMESPACE")
 KAFKA_REPLICAS = int(os.environ.get("KAFKA_REPLICAS"))
+POD_NAME = os.environ.get("POD_NAME")
 
 redis_client = redis.StrictRedis(host=f'{REDIS_IP}', port=6379)
 start_time = ''
@@ -60,7 +61,7 @@ async def call_containers(containers, timestamp, start_time):
         print(f"Sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
         try:
             match communication_type:
-                case 'async':
+                case 'mq':
                     tasks.append(asyncio.create_task(produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data, KAFKA_REPLICAS)))
                 case 'rpc':
                     tasks.append(asyncio.create_task(contact_rpc_server(json_data)))
@@ -148,7 +149,7 @@ if __name__ == "__main__":
         if os.path.exists('calls.json'):
             print("calls.json found")
             with open('calls.json') as f:
-                calls = json.load(f)
+                calls = json.load(f)[POD_NAME]
             break
         time.sleep(1)
     print(calls)
