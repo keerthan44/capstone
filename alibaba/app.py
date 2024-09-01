@@ -29,32 +29,21 @@ def upload():
     # Process the first CSV to generate calls.json
     df1 = read_and_sort_csv(file1)
     result = {}
-    service_replicas = {}
+    containers = set()
 
     for _, row in df1.iterrows():
         timestamp = row['timestamp']
         um = row['um']
         dm = row['dm']
-        uminstanceid = row['uminstanceid']
-        dminstanceid = row['dminstanceid']
         rpctype = row['rpctype']
 
         if '?' in um or '?' in dm:
             continue
+        containers.update([um, dm])
 
-        # Update replicas for um
-        if um not in service_replicas:
-            service_replicas[um] = set()
-        service_replicas[um].add(uminstanceid)
-
-        # Update replicas for dm
-        if dm not in service_replicas:
-            service_replicas[dm] = set()
-        service_replicas[dm].add(dminstanceid)
-
-        # Build the call graph
         if um not in result:
             result[um] = {}
+
         if timestamp not in result[um]:
             result[um][timestamp] = []
         result[um][timestamp].append({
@@ -62,15 +51,32 @@ def upload():
             "communication_type": rpctype
         })
 
-    # Process the second CSV (not needed in the current logic but kept for completeness)
+    # Process the second CSV to generate containers.json
     df2 = pd.read_csv(file2)
-    # No processing needed as we're using instance IDs from the first file
+    ms_replicas = {}
 
-    # Generate containers.json
+    for _, row in df2.iterrows():
+        msname = row['msName']
+        msinstanceid = row['msinstanceid']
+
+        if msname not in ms_replicas:
+            ms_replicas[msname] = set()
+
+        ms_replicas[msname].add(msinstanceid)
+
+    # Debugging: Print to console to verify content
+    print("ms_replicas:", ms_replicas)
+
     containers_json = [
-        {"msName": service, "replicas": len(instances)}
-        for service, instances in service_replicas.items()
+        {"msName": msname, "replicas": len(instances)}
+        for msname, instances in ms_replicas.items()
     ]
+
+    # Debugging: Print to console to verify content
+    print("containers_json:", containers_json)
+
+    # output_directory = os.path.join(os.getcwd(), 'containers')
+    # os.makedirs(output_directory, exist_ok=True)
 
     # Write calls.json
     with open('../containers/calls.json', 'w') as f:
@@ -80,6 +86,8 @@ def upload():
     with open('../containers/containers.json', 'w') as f:
         json.dump(containers_json, f, indent=4)
 
+    # Debugging: Confirm that the file was written
+    
     return jsonify({
         "calls": result,
         "containers": containers_json
