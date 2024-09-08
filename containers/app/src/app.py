@@ -109,15 +109,23 @@ async def contact_containers(calls):
 
     else:    
         stop_event = threading.Event()
-        
-        def background_task():
+        # Function to compute Pi using the Leibniz series
+        def compute_pi(terms: int) -> float:
+            pi = 0.0
+            for i in range(terms):
+                pi += ((-1) ** i) / (2 * i + 1)  # Leibniz series formula
+            return 4 * pi
+            
+        def background_task(terms=100000):
             while not stop_event.is_set():
-                # Simulate background task
-                print("Background task is running...", file=sys.stderr)
-                time.sleep(1)
-        
+                # Compute Pi
+                pi_value = compute_pi(terms)
+                
+                # Simulate background task and print Pi value
+                print(f"Background task is running... Computed Pi: {pi_value}", file=sys.stderr)
+            
         # Start the background task in a separate thread
-        bg_thread = threading.Thread(target=background_task)
+        bg_thread = threading.Thread(target=background_task, daemon=True)
         bg_thread.start()
         
         while True:
