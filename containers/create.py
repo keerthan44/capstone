@@ -124,21 +124,48 @@ def create_logging_service(v1, namespace):
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Logging Service created in namespace '{namespace}'.")
 
-def create_logging_deployment(apps_v1, namespace, redis_ip):
+def create_logging_statefulset(apps_v1, namespace, redis_ip):
     container = V1Container(
         name="logging-container",
-        image=f"logging_capstone",
+        image="logging_capstone",
         env=[client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip)],
         ports=[client.V1ContainerPort(container_port=80)],
         image_pull_policy="IfNotPresent"
     )
-    pod_spec = V1PodSpec(containers=[container])
-    template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": "logging"}), spec=pod_spec)
-    spec = V1DeploymentSpec(replicas=1, template=template, selector=V1LabelSelector(match_labels={"app": "logging"}))
-    deployment = V1Deployment(metadata=V1ObjectMeta(name="logging-deployment", namespace=namespace), spec=spec)
     
-    apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
-    print(f"Logging Deployment created in namespace '{namespace}'.")
+    volume = client.V1Volume(
+        name="logging-config-volume",
+        config_map=client.V1ConfigMapVolumeSource(name="logging-config")
+    )
+
+    pod_spec = V1PodSpec(containers=[container], volumes=[volume])
+    template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": "logging"}), spec=pod_spec)
+    
+    stateful_set_spec = V1StatefulSetSpec(
+        service_name="logging-service",
+        replicas=1,
+        selector=V1LabelSelector(match_labels={"app": "logging"}),
+        template=template,
+        volume_claim_templates=[client.V1PersistentVolumeClaim(
+            metadata=client.V1ObjectMeta(name="logging-data"),
+            spec=client.V1PersistentVolumeClaimSpec(
+                access_modes=["ReadWriteOnce"],
+                resources=client.V1ResourceRequirements(
+                    requests={"storage": "1Gi"}
+                )
+            )
+        )],
+        pod_management_policy="OrderedReady",
+        update_strategy=client.V1StatefulSetUpdateStrategy(type="RollingUpdate")
+    )
+
+    stateful_set = V1StatefulSet(
+        metadata=V1ObjectMeta(name="logging-statefulset", namespace=namespace),
+        spec=stateful_set_spec
+    )
+    
+    apps_v1.create_namespaced_stateful_set(namespace=namespace, body=stateful_set)
+    print(f"Logging StatefulSet created in namespace '{namespace}'.")
 
 def create_container_statefulset(apps_v1, namespace, container_name, config_map_name, kafka_replicas, redis_ip, container_job, replicas=1):
     container = V1Container(
@@ -211,12 +238,6 @@ def create_container_service(v1, namespace, container_name, port_mappings):
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Service '{container_name}-service' created in namespace '{namespace}' with ports: {port_mappings}.")
 
-# def split_calls_to_replicas(data, replicas, mappedName, choice):
-#     # print("Data: ",data)
-#     # print("replicas: ",replicas)
-#     # print("mappedName: ",mappedName)
-#     return {f"{mappedName}-statefulset-{str(i)}": data for i in range(replicas)}
-
 def split_calls_to_replicas(data, replicas, mappedName, choice):
     # Initialize the result dictionary
     result = {f"{mappedName}-statefulset-{i}": defaultdict(list) for i in range(replicas)}
@@ -260,7 +281,7 @@ def main():
     (redis_service_name, ) = deploy_redis_environment(NAMESPACE, v1, apps_v1)
     wait_for_pods_ready(NAMESPACE)
 
-    create_logging_deployment(apps_v1, NAMESPACE, redis_ip=redis_service_name)
+    create_logging_statefulset(apps_v1, NAMESPACE, redis_ip=redis_service_name)
     create_logging_service(v1, NAMESPACE)
     
     choice = input("Do you want random assignment of calls between instance IDs or round robin assignment?\n (Enter 0 for 'random' or 1 for 'round_robin'): ").strip().lower()
