@@ -1,5 +1,7 @@
 import os
 import json
+import random
+from collections import defaultdict
 from kubernetes import client, config
 from kubernetes.client import V1Deployment, V1DeploymentSpec, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1LabelSelector, V1Volume, V1ConfigMapVolumeSource, V1VolumeMount
 from kafka_setup import deploy_kafka_environment, create_topics_http_request
@@ -209,8 +211,35 @@ def create_container_service(v1, namespace, container_name, port_mappings):
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Service '{container_name}-service' created in namespace '{namespace}' with ports: {port_mappings}.")
 
-def split_calls_to_replicas(data, replicas, mappedName):
-    return {f"{mappedName}-statefulset-{str(i)}": data for i in range(replicas)}
+# def split_calls_to_replicas(data, replicas, mappedName, choice):
+#     # print("Data: ",data)
+#     # print("replicas: ",replicas)
+#     # print("mappedName: ",mappedName)
+#     return {f"{mappedName}-statefulset-{str(i)}": data for i in range(replicas)}
+
+def split_calls_to_replicas(data, replicas, mappedName, choice):
+    # Initialize the result dictionary
+    result = {f"{mappedName}-statefulset-{i}": defaultdict(list) for i in range(replicas)}
+
+    # Convert data into a list of calls, each with a timestamp
+    calls = [(t, call) for t, calls_list in data.items() for call in calls_list]
+    
+    if choice == "round_robin":
+        # Distribute calls in a round-robin fashion
+        for idx, (timestamp, call) in enumerate(calls):
+            statefulset_index = idx % replicas
+            result[f"{mappedName}-statefulset-{statefulset_index}"][timestamp].append(call)
+    
+    elif choice == "random":
+        # Distribute calls randomly
+        for timestamp, call in calls:
+            statefulset_index = random.randint(0, replicas - 1)
+            result[f"{mappedName}-statefulset-{statefulset_index}"][timestamp].append(call)
+    
+    else:
+        raise ValueError("Invalid choice. Please select 'random' or 'round_robin'.")
+    
+    return result
 
 def main():
     NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
@@ -234,6 +263,8 @@ def main():
     create_logging_deployment(apps_v1, NAMESPACE, redis_ip=redis_service_name)
     create_logging_service(v1, NAMESPACE)
     
+    choice = input("Do you want random assignment of calls between instance IDs or round robin assignment?\n (Enter 'random' or 'round_robin'): ").strip().lower()
+
     topics = []
     for container in renamed_containers:
         containerKeys = renamed_containers[container]
@@ -242,7 +273,8 @@ def main():
         topics.append({ "name": mappedName, "partitions": 1, "replication_factor": kafka_replicas })
         
         config_map_name = f"{mappedName}-config"
-        data = split_calls_to_replicas(calls.get(mappedName, {}), replicas, mappedName)
+        data = split_calls_to_replicas(calls.get(mappedName, {}), replicas, mappedName, choice)
+        # print(data)
         create_config_map(v1, NAMESPACE, config_map_name, data=json.dumps(data))
     
     create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
