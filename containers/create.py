@@ -224,13 +224,13 @@ def split_calls_to_replicas(data, replicas, mappedName, choice):
     # Convert data into a list of calls, each with a timestamp
     calls = [(t, call) for t, calls_list in data.items() for call in calls_list]
     
-    if choice == "round_robin":
+    if choice == "1":
         # Distribute calls in a round-robin fashion
         for idx, (timestamp, call) in enumerate(calls):
             statefulset_index = idx % replicas
             result[f"{mappedName}-statefulset-{statefulset_index}"][timestamp].append(call)
     
-    elif choice == "random":
+    elif choice == "0":
         # Distribute calls randomly
         for timestamp, call in calls:
             statefulset_index = random.randint(0, replicas - 1)
@@ -263,7 +263,7 @@ def main():
     create_logging_deployment(apps_v1, NAMESPACE, redis_ip=redis_service_name)
     create_logging_service(v1, NAMESPACE)
     
-    choice = input("Do you want random assignment of calls between instance IDs or round robin assignment?\n (Enter 'random' or 'round_robin'): ").strip().lower()
+    choice = input("Do you want random assignment of calls between instance IDs or round robin assignment?\n (Enter 0 for 'random' or 1 for 'round_robin'): ").strip().lower()
 
     topics = []
     for container in renamed_containers:
