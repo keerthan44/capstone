@@ -170,7 +170,7 @@ def create_logging_statefulset(apps_v1, namespace, redis_ip):
 def create_container_statefulset(apps_v1, namespace, container_name, config_map_name, kafka_replicas, redis_ip, container_job, replicas=1):
     container = V1Container(
         name=container_name,
-        image=f"flask-contact-container",
+        image="flask-contact-container",
         env=[
             client.V1EnvVar(name="CONTAINER_NAME", value=container_name),
             client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip),
@@ -178,7 +178,6 @@ def create_container_statefulset(apps_v1, namespace, container_name, config_map_
             client.V1EnvVar(name="NAMESPACE", value=namespace),
             client.V1EnvVar(name="KAFKA_REPLICAS", value=str(kafka_replicas)),
             client.V1EnvVar(name="POD_NAME", value_from=client.V1EnvVarSource(field_ref=client.V1ObjectFieldSelector(field_path="metadata.name"))),
-
         ],
         volume_mounts=[client.V1VolumeMount(mount_path="/app/calls.json", sub_path="data", name="config-volume")],
         image_pull_policy="IfNotPresent"
@@ -197,15 +196,6 @@ def create_container_statefulset(apps_v1, namespace, container_name, config_map_
         replicas=replicas,
         selector=V1LabelSelector(match_labels={"app": container_name}),
         template=template,
-        volume_claim_templates=[client.V1PersistentVolumeClaim(
-            metadata=client.V1ObjectMeta(name=f"{container_name}-data"),
-            spec=client.V1PersistentVolumeClaimSpec(
-                access_modes=["ReadWriteOnce"],
-                resources=client.V1ResourceRequirements(
-                    requests={"storage": "1Gi"}
-                )
-            )
-        )],
         pod_management_policy="OrderedReady",
         update_strategy=client.V1StatefulSetUpdateStrategy(type="RollingUpdate")
     )
