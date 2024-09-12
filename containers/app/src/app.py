@@ -154,9 +154,9 @@ if __name__ == "__main__":
     grpc_process = run_grpc_server_process()
     while True:
         print("Waiting for calls.json")
-        if os.path.exists('calls.json'):
+        if os.path.exists('data/calls.json'):
             print("calls.json found")
-            with open('calls.json') as f:
+            with open('data/calls.json') as f:
                 calls = json.load(f)[POD_NAME]
             break
         time.sleep(1)

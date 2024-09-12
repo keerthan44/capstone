@@ -2,7 +2,7 @@ import time
 from kubernetes import client, config
 from kubernetes.client import V1Service, V1ObjectMeta, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1PodSpec, V1Container, V1ContainerPort, V1PersistentVolumeClaim, V1EnvVar
 from kubernetes.client.rest import ApiException
-from utils import get_service_external_ip_forwarded_port, wait_for_pods_ready, get_minikube_service_ip_port
+from utils import get_service_external_ip_forwarded_port, wait_for_pods_ready, get_minikube_service_ip_port, get_docker_image_with_pre_suffix
 
 import os
 import requests
@@ -110,7 +110,7 @@ def create_kafka_external_gateway_deployment(apps_v1, namespace):
     """Create a Kubernetes Deployment."""
     container = client.V1Container(
         name="kafka-external-gateway",
-        image='kafka-external-gateway:latest',
+        image=get_docker_image_with_pre_suffix('kafka-external-gateway'),
         ports=[client.V1ContainerPort(container_port=8080)],
         env=[
             client.V1EnvVar(name="KAFKA_BROKER", value="localhost:9092")

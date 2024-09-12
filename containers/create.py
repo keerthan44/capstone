@@ -1,17 +1,19 @@
+import math
 import os
 import json
 import random
 from collections import defaultdict
 from kubernetes import client, config
-from kubernetes.client import V1Deployment, V1DeploymentSpec, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1LabelSelector, V1Volume, V1ConfigMapVolumeSource, V1VolumeMount
+from kubernetes.client import V1EnvVar, V1EnvVarSource, V1ObjectFieldSelector, V1PersistentVolumeClaimVolumeSource, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1LabelSelector, V1Volume, V1ConfigMapVolumeSource, V1VolumeMount
 from kafka_setup import deploy_kafka_environment, create_topics_http_request
-from utils import wait_for_pods_ready, port_forward_and_exec_func, get_or_create_namespace   
+from utils import wait_for_pods_ready, port_forward_and_exec_func, get_or_create_namespace, wait_for_all_jobs_to_complete, delete_completed_jobs, wait_for_job_completion, get_docker_image_with_pre_suffix, delete_all_configmaps
 from dotenv import load_dotenv
 from redis_setup import deploy_redis_environment, set_start_time_redis
 
 load_dotenv()  # take environment variables from .env.
 
 dockerUsername = os.getenv("DOCKER_USERNAME")
+MAX_K8S_API_LIMIT = 512 * 1024  # 3MB limit in bytes
 
 def read_container_names(file_path):
     with open(file_path, 'r') as file:
@@ -127,7 +129,7 @@ def create_logging_service(v1, namespace):
 def create_logging_statefulset(apps_v1, namespace, redis_ip):
     container = V1Container(
         name="logging-container",
-        image="logging_capstone",
+        image=get_docker_image_with_pre_suffix("logging_capstone"),
         env=[client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip)],
         ports=[client.V1ContainerPort(container_port=80)],
         image_pull_policy="IfNotPresent"
@@ -167,25 +169,168 @@ def create_logging_statefulset(apps_v1, namespace, redis_ip):
     apps_v1.create_namespaced_stateful_set(namespace=namespace, body=stateful_set)
     print(f"Logging StatefulSet created in namespace '{namespace}'.")
 
-def create_container_statefulset(apps_v1, namespace, container_name, config_map_name, kafka_replicas, redis_ip, container_job, replicas=1):
+def calculate_storage_size(data_str):
+    # Calculate the size of the JSON data in bytes
+    data_length = len(data_str)
+    
+    # Convert bytes to MiB (1 MiB = 1024 * 1024 bytes)
+    size_in_mib = math.ceil(data_length / (1024 * 1024))
+    
+    # Convert to GiB if needed (optional, but usually MiB is fine for most uses)
+    # size_in_gib = math.ceil(size_in_mib / 1024)
+    
+    # Choose to use GiB or MiB based on your requirements
+    # For simplicity, we'll use MiB here
+    return f"{size_in_mib + 100}Mi"
+
+def create_pvc(v1, namespace, pvc_name, data_str):
+    size = calculate_storage_size(data_str)
+
+    pvc = client.V1PersistentVolumeClaim(
+        metadata=client.V1ObjectMeta(name=pvc_name, namespace=namespace),
+        spec=client.V1PersistentVolumeClaimSpec(
+            access_modes=['ReadOnlyMany'],
+            resources=client.V1ResourceRequirements(
+                requests={'storage': size}
+            )
+        )
+    )
+
+    v1.create_namespaced_persistent_volume_claim(namespace=namespace, body=pvc)
+    print(f"PersistentVolumeClaim '{pvc_name}' created in namespace '{namespace}'.")
+
+def split_data(data_str, chunk_size=MAX_K8S_API_LIMIT):
+    """
+    Splits the data_str into chunks of chunk_size (3MB by default).
+    """
+    return [data_str[i:i + chunk_size] for i in range(0, len(data_str), chunk_size)]
+
+def chunk_terminator_next(index):
+    """
+    Add a unique terminator to the end of each chunk to ensure that the chunks are processed in order.
+    """
+    return f"&&__NEXT_CHUNK_{index}__&&"
+
+def create_job_with_chunk(batch_v1, namespace, job_name, pvc_name, chunk, chunk_index, isLastChunk, check_value=None):
+    """
+    Create a single Kubernetes Job to write a chunk of data to the PVC.
+    Continuously check the file's last N characters, where N is the length of `check_value`,
+    waiting until `check_value` is present before deleting those characters and writing the chunk.
+    """
+    chunk_job_name = f"{job_name}-{chunk_index}"
+
+    # Get the length of the check_value
+    check_value_length = len(check_value) + 1 if check_value else 0
+
+    # Create a script with the necessary commands
+    script_commands = []
+    if check_value:
+        script_commands.append(f'while [ "$(tail -c {check_value_length} /data/calls.json)" != "{check_value}" ]; do sleep 1; done;')
+        script_commands.append(r"sed -i '$ s/.\{" + str(check_value_length - 1) + r"\}$//' /data/calls.json")
+    
+    if not isLastChunk:
+        chunk += chunk_terminator_next(chunk_index + 1)
+    
+    script_commands.append(f'echo "{chunk}" >> /data/calls.json')
+
+    script_content = '\n'.join(script_commands)
+
+    # Create the ConfigMap with the script
+    config_map = client.V1ConfigMap(
+        metadata=client.V1ObjectMeta(name=f'{chunk_job_name}-script', namespace=namespace),
+        data={'script.sh': script_content}
+    )
+
+    # Apply the ConfigMap
+    core_v1 = client.CoreV1Api()
+    core_v1.create_namespaced_config_map(namespace=namespace, body=config_map)
+
+    # Create the job definition
+    job = client.V1Job(
+        metadata=client.V1ObjectMeta(name=chunk_job_name, namespace=namespace),
+        spec=client.V1JobSpec(
+            template=client.V1PodTemplateSpec(
+                spec=client.V1PodSpec(
+                    containers=[
+                        client.V1Container(
+                            name='populate-container',
+                            image='busybox',
+                            command=['sh', '/scripts/script.sh'],
+                            volume_mounts=[
+                                client.V1VolumeMount(
+                                    mount_path='/scripts',
+                                    name='script-volume'
+                                ),
+                                client.V1VolumeMount(
+                                    mount_path='/data',
+                                    name='my-pvc'
+                                )
+                            ]
+                        )
+                    ],
+                    restart_policy='Never',
+                    volumes=[
+                        client.V1Volume(
+                            name='script-volume',
+                            config_map=client.V1ConfigMapVolumeSource(
+                                name=f'{chunk_job_name}-script'
+                            )
+                        ),
+                        client.V1Volume(
+                            name='my-pvc',
+                            persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
+                                claim_name=pvc_name
+                            )
+                        )
+                    ]
+                )
+            ),
+            backoff_limit=0
+        )
+    )
+
+    # Create the job in Kubernetes
+    batch_v1.create_namespaced_job(namespace=namespace, body=job)
+    print(f"Job '{chunk_job_name}' created in namespace '{namespace}' to write chunk {chunk_index} after check_value is found and deleted in PVC '{pvc_name}'.")
+
+
+
+def create_jobs_with_data(batch_v1, namespace, job_name, pvc_name, data_str):
+    """
+    Split data_str into chunks and create multiple jobs, each handling one chunk.
+    """
+    # Split the data into chunks within the Kubernetes API limit
+    data_chunks = split_data(data_str)
+    chunks_numbers = len(data_chunks)
+    create_job_with_chunk(batch_v1, namespace, job_name, pvc_name, data_chunks[0], 0, 1 == chunks_numbers)
+
+    # Create a job for each chunk and wait for its completion before proceeding to the next
+    if chunks_numbers > 1:
+        for chunk_index, chunk in enumerate(data_chunks[1:], 1):
+            create_job_with_chunk(batch_v1, namespace, job_name, pvc_name, chunk, chunk_index, chunk_index + 1 == chunks_numbers, check_value=chunk_terminator_next(chunk_index))
+
+    print(f"Total {chunks_numbers} jobs created to handle the data.")
+
+
+def create_container_statefulset(apps_v1, namespace, container_name, pvc_name, kafka_replicas, redis_ip, container_job, replicas=1):
     container = V1Container(
         name=container_name,
-        image="flask-contact-container",
+        image=get_docker_image_with_pre_suffix("flask-contact-container"),
         env=[
-            client.V1EnvVar(name="CONTAINER_NAME", value=container_name),
-            client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip),
-            client.V1EnvVar(name="CONTAINER_JOB", value=str(container_job)),
-            client.V1EnvVar(name="NAMESPACE", value=namespace),
-            client.V1EnvVar(name="KAFKA_REPLICAS", value=str(kafka_replicas)),
-            client.V1EnvVar(name="POD_NAME", value_from=client.V1EnvVarSource(field_ref=client.V1ObjectFieldSelector(field_path="metadata.name"))),
+            V1EnvVar(name="CONTAINER_NAME", value=container_name),
+            V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip),
+            V1EnvVar(name="CONTAINER_JOB", value=str(container_job)),
+            V1EnvVar(name="NAMESPACE", value=namespace),
+            V1EnvVar(name="KAFKA_REPLICAS", value=str(kafka_replicas)),
+            V1EnvVar(name="POD_NAME", value_from=V1EnvVarSource(field_ref=V1ObjectFieldSelector(field_path="metadata.name"))),
         ],
-        volume_mounts=[client.V1VolumeMount(mount_path="/app/calls.json", sub_path="data", name="config-volume")],
-        image_pull_policy="IfNotPresent"
+        volume_mounts=[V1VolumeMount(mount_path="/app/data", name="data-volume")],
+        image_pull_policy="Always"
     )
-    
-    volume = client.V1Volume(
-        name="config-volume",
-        config_map=client.V1ConfigMapVolumeSource(name=config_map_name)
+
+    volume = V1Volume(
+        name="data-volume",
+        persistent_volume_claim=V1PersistentVolumeClaimVolumeSource(claim_name=pvc_name)
     )
 
     pod_spec = V1PodSpec(containers=[container], volumes=[volume])
@@ -207,6 +352,7 @@ def create_container_statefulset(apps_v1, namespace, container_name, config_map_
     
     apps_v1.create_namespaced_stateful_set(namespace=namespace, body=stateful_set)
     print(f"StatefulSet '{container_name}-statefulset' created in namespace '{namespace}' with {replicas} replicas.")
+
 
 def create_container_service(v1, namespace, container_name, port_mappings):
     service_ports = [
@@ -261,6 +407,7 @@ def main():
     v1 = client.CoreV1Api()
     apps_v1 = client.AppsV1Api()
     rbac_v1 = client.RbacAuthorizationV1Api()
+    batch_v1 = client.BatchV1Api()
 
     get_or_create_namespace(NAMESPACE)
 
@@ -283,10 +430,17 @@ def main():
         replicas = containerKeys['replicas']
         topics.append({ "name": mappedName, "partitions": 1, "replication_factor": kafka_replicas })
         
-        config_map_name = f"{mappedName}-config"
+        pvc_name = f"{mappedName}-pvc"
+        job_name = f"{mappedName}-job"
         data = split_calls_to_replicas(calls.get(mappedName, {}), replicas, mappedName, choice)
         # print(data)
-        create_config_map(v1, NAMESPACE, config_map_name, data=json.dumps(data))
+        # create_config_map(v1, NAMESPACE, config_map_name, data=json.dumps(data))
+        data_str = json.dumps(data).replace('"', '\\"')
+        create_pvc(v1, NAMESPACE, pvc_name, data_str)
+        create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
+    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
+    delete_all_configmaps(v1, NAMESPACE)
+    delete_completed_jobs(batch_v1, v1, NAMESPACE)
     
     create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
@@ -300,8 +454,8 @@ def main():
         # Create services for each container
         create_container_service(v1, NAMESPACE, mappedName, [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
         
-        config_map_name = f"{mappedName}-config"
-        create_container_statefulset(apps_v1, NAMESPACE, mappedName, config_map_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
+        pvc_name = f"{mappedName}-pvc"
+        create_container_statefulset(apps_v1, NAMESPACE, mappedName, pvc_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
 
     wait_for_pods_ready(NAMESPACE)
     print("All statefulsets, deployments and services are up in Kubernetes.")

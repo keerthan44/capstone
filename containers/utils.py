@@ -7,6 +7,7 @@ import signal
 import os
 import subprocess
 from kubernetes.client.rest import ApiException
+import asyncio
 
 def wait_for_pods_ready(namespace):
     config.load_kube_config()
@@ -211,3 +212,142 @@ def get_service_external_ip_forwarded_port(service_name, namespace=None, target_
     except subprocess.CalledProcessError as e:
         print(f"Failed to get service info: {e}")
         return None, None
+
+def wait_for_job_completion(batch_v1, namespace, job_name):
+    """
+    Wait for a specific Kubernetes Job to complete.
+    """
+    while True:
+        job_status = batch_v1.read_namespaced_job_status(job_name, namespace)
+        if job_status.status.succeeded == 1:
+            print(f"Job '{job_name}' completed successfully.")
+            break
+        elif job_status.status.failed:
+            print(f"Job '{job_name}' failed.")
+            break
+        time.sleep(2)  # Check every 2 seconds
+
+def wait_for_all_jobs_to_complete(batch_v1, namespace):
+    while True:
+        # List all Jobs in the specified namespace
+        jobs = batch_v1.list_namespaced_job(namespace=namespace)
+        all_jobs_completed = True
+        
+        for job in jobs.items:
+            job_name = job.metadata.name
+            job_status = job.status
+            
+            # Check if the job is completed
+            if job_status.succeeded is None or job_status.succeeded == 0:
+                print(f"Job '{job_name}' is not completed yet.")
+                all_jobs_completed = False
+        
+        if all_jobs_completed:
+            print("All jobs are completed.")
+            return
+        
+        print("Waiting for all jobs to complete...")
+        time.sleep(3)  # Sleep for 3 seconds before checking again
+
+def delete_completed_jobs(batch_v1, v1_core, namespace):
+    while True:
+        # List all Jobs in the specified namespace
+        jobs = batch_v1.list_namespaced_job(namespace=namespace)
+        any_job_deleted = False
+        
+        for job in jobs.items:
+            job_name = job.metadata.name
+            job_status = job.status
+            
+            # Check if the job is completed
+            if job_status.succeeded is not None and job_status.succeeded > 0:
+                print(f"Deleting completed job '{job_name}'.")
+                
+                # Delete the Job
+                batch_v1.delete_namespaced_job(name=job_name, namespace=namespace, body=client.V1DeleteOptions(propagation_policy='Foreground'))
+        
+        if not any_job_deleted:
+            print("All completed jobs have been deleted.")
+            break
+        
+        print("Waiting for more jobs to complete...")
+        time.sleep(3)  # Sleep for 3 seconds before checking again
+    
+def get_docker_image_with_pre_suffix(name, pre=None, suffix=None):
+    """
+    Generate a Docker image string with an optional prefix and suffix.
+    
+    Args:
+        name (str): The name of the Docker image.
+        pre (str): Optional Docker image prefix (default: value from DOCKER_PREFIX environment variable).
+        suffix (str): Optional Docker image suffix (default: value from DOCKER_SUFFIX environment variable).
+        
+    Returns:
+        str: The formatted Docker image string.
+    """
+    # Use environment variables if pre or suffix are not provided
+    pre = pre or os.environ.get('DOCKER_PREFIX')
+    suffix = suffix or os.environ.get('DOCKER_SUFFIX')
+
+    # Construct the image name with optional prefix and suffix
+    prefix_part = f"{pre}/" if pre else ""
+    suffix_part = f":{suffix}" if suffix else ""
+
+    print(f"{prefix_part}{name}{suffix_part}")
+    # Return the final Docker image string
+    return f"{prefix_part}{name}{suffix_part}"
+
+
+async def delete_configmap_async(core_v1, namespace, configmap_name):
+    """
+    Asynchronously delete a single ConfigMap by name in the specified namespace.
+    
+    Args:
+        core_v1: The CoreV1Api instance for interacting with Kubernetes ConfigMaps.
+        namespace: The namespace where the ConfigMap resides.
+        configmap_name: The name of the ConfigMap to delete.
+    """
+    try:
+        print(f"Deleting ConfigMap: {configmap_name}")
+        core_v1.delete_namespaced_config_map(name=configmap_name, namespace=namespace)
+        # Add a small delay to prevent overwhelming the API server
+        await asyncio.sleep(0.1)
+    except ApiException as e:
+        print(f"Exception when deleting ConfigMap {configmap_name}: {e}")
+
+async def delete_all_configmaps_async(core_v1, namespace):
+    """
+    Asynchronously delete all ConfigMaps in a specified namespace.
+    
+    Args:
+        core_v1: The CoreV1Api instance for interacting with Kubernetes ConfigMaps.
+        namespace: The namespace from which to delete all ConfigMaps.
+    """
+    try:
+        # List all ConfigMaps in the specified namespace
+        configmaps = core_v1.list_namespaced_config_map(namespace).items
+        
+        # Create asynchronous tasks for deleting all ConfigMaps
+        delete_tasks = [
+            delete_configmap_async(core_v1, namespace, configmap.metadata.name)
+            for configmap in configmaps
+        ]
+        
+        # Await the completion of all delete tasks
+        await asyncio.gather(*delete_tasks)
+        
+        print(f"All ConfigMaps in namespace '{namespace}' have been deleted.")
+    
+    except ApiException as e:
+        print(f"Exception when listing or deleting ConfigMaps: {e}")
+
+def delete_all_configmaps(core_v1, namespace):
+    """
+    Synchronous wrapper for the asynchronous delete function to ensure it completes
+    before proceeding with the next code.
+    
+    Args:
+        core_v1: The CoreV1Api instance for interacting with Kubernetes ConfigMaps.
+        namespace: The namespace from which to delete all ConfigMaps.
+    """
+    asyncio.run(delete_all_configmaps_async(core_v1, namespace))
