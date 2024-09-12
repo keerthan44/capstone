@@ -8,6 +8,10 @@ for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
 
 # Insert gnome-terminal
 sudo apt install -y gnome-terminal
+# Install Python
+sudo apt install python3  python3-pip python3.11-venv
+python3 -m venv myenv
+source myenv/bin/activate
 
 # Install docker
 curl -fsSL https://get.docker.com -o get-docker.sh
@@ -34,7 +38,6 @@ sudo sed -e 's/SystemdCgroup = false/SystemdCgroup = true/g' -i /etc/containerd/
 sudo systemctl daemon-reload
 sudo systemctl restart containerd
 sudo systemctl enable containerd 
-sudo systemctl status containerd
 
 # Initialize the control plane
 POD_NETWORK_CIDR="192.168.0.0/16"
@@ -47,10 +50,8 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
 # Install WeaveNet CNI (you can replace this with Calico or another CNI if needed)
 kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
-kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/tigera-operator.yaml
-kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/custom-resources.yaml
 
 # Final message
 echo "Control plane setup is complete. Your cluster is ready to accept worker nodes."
 kubeadm token create --print-join-command
-echo "Remember to save the kubeadm join command generated at the end of the 'kubeadm init' process for worker nodes."
+echo "Remember to save the kubeadm join command generated at the end of the previous command process for worker nodes."
