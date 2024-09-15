@@ -11,7 +11,7 @@ sudo apt install -y gnome-terminal
 # Install Python
 sudo apt install python3  python3-pip python3.11-venv
 python3 -m venv myenv
-source myenv/bin/activate
+. ./myenv/bin/activate
 
 # Install docker
 curl -fsSL https://get.docker.com -o get-docker.sh
