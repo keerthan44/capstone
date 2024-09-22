@@ -74,6 +74,32 @@ def get_and_rename_containers(containersFile="containers.json", callsFile="calls
 
     return renamed_containers, calls
 
+def filter_calls_by_communication_type(renamed_containers, calls):
+    db_values = {}
+    memcached_values = {}
+
+    # Iterate through the calls to filter based on the communication type
+    for um in calls:
+        for timestamp, dm_entries in calls[um].items():
+            for entry in dm_entries:
+                comm_type = entry.get('communication_type')
+                if comm_type == 'db':
+                    if um not in db_values:
+                        db_values[um] = {}
+                    if timestamp not in db_values[um]:
+                        db_values[um][timestamp] = []
+                    db_values[um][timestamp].append(entry)
+                elif comm_type == 'mc':
+                    if um not in memcached_values:
+                        memcached_values[um] = {}
+                    if timestamp not in memcached_values[um]:
+                        memcached_values[um][timestamp] = []
+                    memcached_values[um][timestamp].append(entry)
+    
+    return db_values, memcached_values
+
+
+
 def addContainerJob(containers):
     while True:
         print("Menu: ")
@@ -414,6 +440,10 @@ def main():
     (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
     renamed_containers, calls = get_and_rename_containers()
+
+
+    db_values, mc_values = filter_calls_by_communication_type(renamed_containers, calls)
+
 
     (redis_service_name, ) = deploy_redis_environment(NAMESPACE, v1, apps_v1)
     wait_for_pods_ready(NAMESPACE)
