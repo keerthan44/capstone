@@ -74,31 +74,43 @@ def get_and_rename_containers(containersFile="containers.json", callsFile="calls
 
     return renamed_containers, calls
 
-def filter_calls_by_communication_type(renamed_containers, calls):
+def filter_containers_by_communication_type(renamed_containers, calls):
     db_values = {}
     memcached_values = {}
+
+    # Create a reverse mapping from mapped names (e.g., s1, s2) to original names (e.g., USER, MS_41019)
+    reverse_mapping = {details['mappedName']: original_name for original_name, details in renamed_containers.items()}
 
     # Iterate through the calls to filter based on the communication type
     for um in calls:
         for timestamp, dm_entries in calls[um].items():
             for entry in dm_entries:
-                comm_type = entry.get('communication_type')
-                if comm_type == 'db':
-                    if um not in db_values:
-                        db_values[um] = {}
-                    if timestamp not in db_values[um]:
-                        db_values[um][timestamp] = []
-                    db_values[um][timestamp].append(entry)
-                elif comm_type == 'mc':
-                    if um not in memcached_values:
-                        memcached_values[um] = {}
-                    if timestamp not in memcached_values[um]:
-                        memcached_values[um][timestamp] = []
-                    memcached_values[um][timestamp].append(entry)
-    
+                comm_type = entry.get('communication_type', '').strip().lower()  # Normalize the comm_type to lowercase and remove extra spaces
+                dm_service = entry['dm_service']  # This will be something like s2, s3, etc.
+
+                # Debug: print communication type and service to ensure values are correct
+                #print(f"Processing service: {dm_service}, communication_type: {comm_type}")
+
+                # Reverse lookup to find the original service name from the mapped name
+                if dm_service in reverse_mapping:
+                    original_service = reverse_mapping[dm_service]
+                    #print(f"Mapped service {dm_service} to original service {original_service}.")
+
+                    # Check if the original service is in renamed_containers and handle accordingly
+                    if original_service in renamed_containers:
+                        if comm_type == 'db':
+                            # Store the service in db_values and then remove it from renamed_containers
+                            db_values[original_service] = renamed_containers[original_service]
+                            del renamed_containers[original_service]  # Delete after storing
+                        elif comm_type == 'mc':
+                            # Store the service in memcached_values and then remove it from renamed_containers
+                            memcached_values[original_service] = renamed_containers[original_service]
+                            del renamed_containers[original_service]  # Delete after storing
+                #else:
+                    
+                    #print(f"Service {dm_service} NOT found in reverse mapping. Skipping.")
+
     return db_values, memcached_values
-
-
 
 def addContainerJob(containers):
     while True:
@@ -441,8 +453,13 @@ def main():
 
     renamed_containers, calls = get_and_rename_containers()
 
+    
 
-    db_values, mc_values = filter_calls_by_communication_type(renamed_containers, calls)
+    # Example usage of the function in your main code
+    
+    db_values, memcached_values = filter_containers_by_communication_type(renamed_containers, calls)
+
+    # Output the results to check
 
 
     (redis_service_name, ) = deploy_redis_environment(NAMESPACE, v1, apps_v1)
