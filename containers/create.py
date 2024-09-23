@@ -74,7 +74,7 @@ def get_and_rename_containers(containersFile="containers.json", callsFile="calls
 
     return renamed_containers, calls
 
-def filter_containers_by_communication_type(renamed_containers, calls):
+def extract_remove_memcached_db_containers(renamed_containers, calls):
     db_values = {}
     memcached_values = {}
 
@@ -457,7 +457,7 @@ def main():
 
     # Example usage of the function in your main code
     
-    db_values, memcached_values = filter_containers_by_communication_type(renamed_containers, calls)
+    db_values, memcached_values = extract_remove_memcached_db_containers(renamed_containers, calls)
 
     # Output the results to check
 
