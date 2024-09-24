@@ -207,6 +207,27 @@ def create_logging_statefulset(apps_v1, namespace, redis_ip):
     apps_v1.create_namespaced_stateful_set(namespace=namespace, body=stateful_set)
     print(f"Logging StatefulSet created in namespace '{namespace}'.")
 
+def create_db_service(v1, namespace, service_name):
+    """
+    Creates a PostgreSQL container for the given service name in the specified namespace.
+    """
+    # Define the PostgreSQL container spec
+    postgres_container = {
+        'name': service_name,
+        'image': 'postgres:latest',  # Use the latest PostgreSQL image
+        'ports': [{'containerPort': 5432}],
+        'env': [
+            {'name': 'POSTGRES_DB', 'value': 'mydatabase'},
+            {'name': 'POSTGRES_USER', 'value': 'user'},
+            {'name': 'POSTGRES_PASSWORD', 'value': 'password'}
+        ],
+    }
+
+    # Create a service in Kubernetes for the DB
+    create_container_service(v1, namespace, service_name, [{'port': 5432, 'target_port': 5432}])
+    create_container_statefulset(v1, namespace, service_name, postgres_container)
+
+
 def calculate_storage_size(data_str):
     # Calculate the size of the JSON data in bytes
     data_length = len(data_str)
@@ -458,6 +479,10 @@ def main():
     # Example usage of the function in your main code
     
     db_values, memcached_values = extract_remove_memcached_db_containers(renamed_containers, calls)
+
+    for service_name, container_keys in db_values.items():
+        mapped_name = container_keys['mappedName']
+        create_db_service(v1, NAMESPACE, mapped_name)
 
     # Output the results to check
 
