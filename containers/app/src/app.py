@@ -15,6 +15,8 @@ from communication_type.kafka.kafka_consumer import start_kafka_consumer_process
 from communication_type.rpc.rpc_client import contact_rpc_server
 from communication_type.rpc.rpc_server import run_grpc_server_process
 
+from communication_type.db.db_call_client import simulate_db_call
+
 CONTAINER_NAME = os.environ.get("CONTAINER_NAME")
 REDIS_IP = os.environ.get("REDIS_IP_ADDRESS")
 CONTAINER_JOB = os.environ.get("CONTAINER_JOB")
@@ -65,6 +67,8 @@ async def call_containers(containers, timestamp, start_time):
                     tasks.append(asyncio.create_task(produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data, KAFKA_REPLICAS)))
                 case 'rpc':
                     tasks.append(asyncio.create_task(contact_rpc_server(json_data)))
+                case 'db':
+                    tasks.append(asyncio.create_task(simulate_db_call(dm_service, json_data)))  # New DB case
                 case _:
                     tasks.append(asyncio.create_task(make_http_call(json_data)))
         except Exception as e:
