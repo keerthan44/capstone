@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from redis_setup import deploy_redis_environment, set_start_time_redis
 import psycopg2
 import random
+import time
 
 
 load_dotenv()  # take environment variables from .env.
@@ -210,6 +211,29 @@ def create_logging_statefulset(apps_v1, namespace, redis_ip):
     apps_v1.create_namespaced_stateful_set(namespace=namespace, body=stateful_set)
     print(f"Logging StatefulSet created in namespace '{namespace}'.")
 
+def wait_for_service_ready(v1, service_name, namespace, max_retries=10, delay=5):
+    """
+    Waits for the Kubernetes service to be ready before proceeding.
+    """
+    retries = 0
+    while retries < max_retries:
+        try:
+            service = v1.read_namespaced_service(service_name, namespace)
+            print(f"Service {service_name} is ready!")
+            return True  # Service is ready
+        except client.exceptions.ApiException as e:
+            if e.status == 404:
+                print(f"Service {service_name} is not ready yet (attempt {retries + 1}/{max_retries}): {e}")
+            else:
+                print(f"Error checking service {service_name} (attempt {retries + 1}/{max_retries}): {e}")
+            
+            retries += 1
+            time.sleep(delay)
+
+    print(f"Service {service_name} is not ready after multiple attempts.")
+    return False
+
+
 def create_db_service(apps_v1, v1, namespace, service_name, kafka_replicas=None, redis_ip=None, container_job=0):
     """
     Creates a PostgreSQL container for the given service name in the specified namespace.
@@ -225,53 +249,84 @@ def create_db_service(apps_v1, v1, namespace, service_name, kafka_replicas=None,
             {'name': 'POSTGRES_PASSWORD', 'value': 'password'}
         ],
     }
+
     # Create a service in Kubernetes for the DB
     create_container_service(v1, namespace, service_name, [{'port': 5432, 'target_port': 5432, 'name': 'postgresql'}])
-    # Pass default or provided values for kafka_replicas, redis_ip, and container_job
-    pvc_name = f"{service_name}-pvc"    
-    # Now pass apps_v1 instead of v1 here
-    create_container_statefulset(apps_v1, namespace, service_name, pvc_name, kafka_replicas, redis_ip, container_job)
-    insert_random_data_into_db(service_name)
 
+    # Wait for a few seconds before proceeding
+    print(f"Waiting for the service {service_name} to be ready...")
+    time.sleep(10)  # Optional delay before readiness check
 
-def insert_random_data_into_db(service_name):
+    # Wait for the service to be ready using the readiness check
+    if wait_for_service_ready(v1, service_name, namespace):
+        print(f"Service {service_name} is ready. Proceeding with StatefulSet creation.")
+        
+        # Pass default or provided values for kafka_replicas, redis_ip, and container_job
+        pvc_name = f"{service_name}-pvc"
+        
+        # Create StatefulSet for the database
+        create_container_statefulset(apps_v1, namespace, service_name, pvc_name, kafka_replicas, redis_ip, container_job)
+
+        # Insert random data into the DB
+        insert_random_data_into_db(service_name)
+    else:
+        print(f"Service {service_name} is not ready. Skipping data insertion.")
+        
+def insert_random_data_into_db(v1, service_name, namespace, max_retries=5, delay=5):
     """
-    Inserts random data into the PostgreSQL container.
+    Inserts random data into the PostgreSQL container with a retry mechanism and prints errors to the terminal.
     """
-    connection = None  # Initialize connection to None
-    try:
-        connection = psycopg2.connect(
-            user="user",
-            password="password",
-            host=f"{service_name}",
-            port="5432",
-            database="mydatabase"
-        )
-        cursor = connection.cursor()
+    # Wait for the service to be ready
+    if not wait_for_service_ready(v1, service_name, namespace):
+        print(f"Service {service_name} is not ready after multiple attempts.")
+        return
 
-        # Create a table if it doesn't exist
-        cursor.execute('''CREATE TABLE IF NOT EXISTS random_data (
-                            id SERIAL PRIMARY KEY,
-                            data VARCHAR(255)
-                          );''')
+    connection = None
+    retries = 0
+    db_host = f"{service_name}.static-application.svc.cluster.local"  # Full DNS name of the service
 
-        # Insert random data
-        for _ in range(5):
-            random_data = f"RandomData{random.randint(1, 100)}"
-            cursor.execute(f"INSERT INTO random_data (data) VALUES ('{random_data}');")
+    while retries < max_retries:
+        try:
+            connection = psycopg2.connect(
+                user="user",
+                password="password",
+                host=db_host,  # Use full DNS name for the service
+                port="5432",
+                database="mydatabase"
+            )
+            cursor = connection.cursor()
 
-        connection.commit()
-        print(f"Random data inserted into {service_name}")
-    
-    except Exception as e:
-        print(f"Error inserting random data: {e}")
-    
-    finally:
-        # Close connection if it was successfully opened
-        if connection:
-            cursor.close()
-            connection.close()
+            # Create a table if it doesn't exist
+            cursor.execute('''CREATE TABLE IF NOT EXISTS random_data (
+                                id SERIAL PRIMARY KEY,
+                                data VARCHAR(255)
+                              );''')
 
+            # Insert random data
+            for _ in range(5):
+                random_data = f"RandomData{random.randint(1, 100)}"
+                cursor.execute(f"INSERT INTO random_data (data) VALUES ('{random_data}');")
+
+            connection.commit()
+            print(f"Random data successfully inserted into {service_name}")
+            break  # Exit the loop once data is successfully inserted
+
+        except Exception as e:
+            # Print the error to the terminal
+            print(f"Error inserting random data into {service_name} (attempt {retries + 1}/{max_retries}): {e}")
+            retries += 1
+            if retries < max_retries:
+                print(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+
+        finally:
+            if connection:
+                cursor.close()
+                connection.close()
+
+    if retries == max_retries:
+        error_message = f"Failed to connect to {service_name} after {max_retries} retries."
+        print(error_message)
 
 def calculate_storage_size(data_str):
     # Calculate the size of the JSON data in bytes
@@ -568,31 +623,18 @@ def main():
         # Use apps_v1 for creating StatefulSets
         create_container_statefulset(apps_v1, NAMESPACE, mappedName, pvc_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
 
-    # Handle DB containers similarly
+    # Handle DB containers differently
     for service_name, container_keys in db_values.items():
         mappedName = container_keys['mappedName']
-        containerJob = container_keys.get('containerJob', 0)  # Use default containerJob for DB containers if not present
-        replicas = container_keys.get('replicas', 1)  # Set default replicas if missing
-
-        pvc_name = f"{mappedName}-pvc"
-        job_name = f"{mappedName}-job"
-        data_str = json.dumps({})  # You might need to customize data for DB if needed
-
-    # Create PVC and Jobs for DB containers
-        create_pvc(v1, NAMESPACE, pvc_name, data_str)
-        create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
-
-    # Create DB service container
+        containerJob = container_keys.get('containerJob', 0)
+    # Corrected call
         create_db_service(apps_v1, v1, NAMESPACE, mappedName, kafka_replicas=kafka_replicas, redis_ip=redis_service_name, container_job=containerJob)
-
-    # Create services and StatefulSet for DB containers
-        create_container_service(v1, NAMESPACE, mappedName, [{ "port": 5432, "target_port": 5432, 'name': 'postgresql' }])
-    # Use apps_v1 for StatefulSets
-        create_container_statefulset(apps_v1, NAMESPACE, mappedName, pvc_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
-
+    
+    
     wait_for_pods_ready(NAMESPACE)
     print("All statefulsets, deployments, and services are up in Kubernetes.")
     port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
+
 
 if __name__ == "__main__":
     main()
