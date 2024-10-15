@@ -496,16 +496,16 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
     print(f"PostgreSQL StatefulSet '{container_name}-statefulset' created in namespace '{namespace}' with {replicas} replicas.")
 
 
-def create_container_statefulset(apps_v1, namespace, container_name, pvc_name, kafka_replicas=None, redis_ip=None, container_job=0, replicas=1):
+def create_container_statefulset(apps_v1, namespace, container_name, pvc_name, kafka_replicas, redis_ip, container_job, replicas=1):
     container = V1Container(
         name=container_name,
-        image=get_docker_image_with_pre_suffix("flask-contact-container" if kafka_replicas else "postgres"),  # Adjust image based on container type
+        image=get_docker_image_with_pre_suffix("flask-contact-container"),
         env=[
             V1EnvVar(name="CONTAINER_NAME", value=container_name),
-            V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip or ""),
+            V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip),
             V1EnvVar(name="CONTAINER_JOB", value=str(container_job)),
             V1EnvVar(name="NAMESPACE", value=namespace),
-            V1EnvVar(name="KAFKA_REPLICAS", value=str(kafka_replicas or 1)),
+            V1EnvVar(name="KAFKA_REPLICAS", value=str(kafka_replicas)),
             V1EnvVar(name="POD_NAME", value_from=V1EnvVarSource(field_ref=V1ObjectFieldSelector(field_path="metadata.name"))),
         ],
         volume_mounts=[V1VolumeMount(mount_path="/app/data", name="data-volume")],
@@ -595,7 +595,9 @@ def main():
     get_or_create_namespace(NAMESPACE)
 
     # Deploy Kafka and get kafka_replicas
-    kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
+    (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
+
+    renamed_containers, calls = get_and_rename_containers()
 
     # Deploy Redis and get redis_ip
     redis_service_name, = deploy_redis_environment(NAMESPACE, v1, apps_v1)
@@ -606,7 +608,6 @@ def main():
     create_logging_service(v1, NAMESPACE)
 
     # Get containers and calls data
-    renamed_containers, calls = get_and_rename_containers()
     db_values, memcached_values = extract_remove_memcached_db_containers(renamed_containers, calls)
     
     # Random or round robin choice
@@ -630,6 +631,12 @@ def main():
         # Create PVC and Jobs for other containers
         create_pvc(v1, NAMESPACE, pvc_name, data_str)
         create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
+
+    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
+    delete_all_configmaps(v1, NAMESPACE)
+    delete_completed_jobs(batch_v1, v1, NAMESPACE)
+    
+    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
     # Assign container jobs
     renamed_containers = addContainerJob(renamed_containers)
@@ -662,10 +669,20 @@ def main():
 
     # Insert random data into all replicas of the DB container
         insert_random_data_into_db_replicas(v1, db_mappedName, NAMESPACE, replicas)
-        
+
 
     
     wait_for_pods_ready(NAMESPACE)
+
+    # for container_name in renamed_containers:
+    #     containerKeys = renamed_containers[container_name]
+    #     mappedName = containerKeys['mappedName']
+    #     containerJob = containerKeys['containerJob']
+    #     replicas = containerKeys['replicas']
+
+    #     insert_random_data_into_db_replicas(v1, db_mappedName, NAMESPACE, replicas)
+
+
     print("All statefulsets, deployments, and services are up in Kubernetes.")
     port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
 
