@@ -150,18 +150,27 @@ def get_external_ip_service(service_name, namespace='default'):
         return f"Failed to get service information: {e}"
 
 def get_minikube_service_ip_port(service_name, namespace):
-    # Retrieve the URL of a Minikube service using the `minikube service` command
     try:
-        result = subprocess.run(
-            ["minikube", "service", service_name, "-n", namespace, "--url"],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        
+        result = ""
+        if os.uname().sysname == 'Darwin':
+            is_minikube = input('Are you using Minikube(y/n): ')
+            if is_minikube == 'y':
+                print(f"Run this command and let it run in terminal.")
+                print(f"minikube service {service_name} -n {namespace} --url")
+                result = input("Enter the url: ")
+        else:
+
+        # Retrieve the URL of a Minikube service using the `minikube service` command
+            result = subprocess.run(
+                ["minikube", "service", service_name, "-n", namespace, "--url"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            result = result.stdout
         # The output should contain the full URL, e.g., http://<ip>:<port>
-        url = result.stdout.strip()
+        url = result.strip()
 
         # Extract IP and port using regex
         match = re.match(r'http://([\d\.]+):(\d+)', url)

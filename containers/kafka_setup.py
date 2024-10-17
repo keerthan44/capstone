@@ -226,13 +226,17 @@ def create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namesp
 
 
 def create_topics_http_request(topics, namespace, kafka_statefulset_name, kafka_external_gateway_name ,kafka_service_name, kafka_external_gateway_nodeport, timeout=60, poll_interval=5, retries=3):
+
     kafka_gateway_ip_port = get_minikube_service_ip_port(kafka_external_gateway_name, namespace)
+
     if not kafka_gateway_ip_port[0] or not kafka_gateway_ip_port[1]:
         kafka_gateway_ip_port = get_service_external_ip_forwarded_port(kafka_external_gateway_name, namespace, target_port=80, node_port_default=kafka_external_gateway_nodeport)
+
     kafka_gateway_ip, kafka_gateway_port = kafka_gateway_ip_port
     if not kafka_gateway_ip or not kafka_gateway_port:
         raise RuntimeError("Failed to get Kafka External Gateway IP and port.")
     
+
     data = {
         "topics": topics,
         "namespace": namespace,

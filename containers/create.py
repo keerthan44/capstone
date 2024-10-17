@@ -686,6 +686,7 @@ def main():
     wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
     delete_all_configmaps(v1, NAMESPACE)
     delete_completed_jobs(batch_v1, v1, NAMESPACE)
+    print("test")
     
     create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
