@@ -237,32 +237,36 @@ def wait_for_service_ready(v1, service_name, namespace, max_retries=5, delay=5):
 
 def create_db_service(v1, namespace, service_name):
     """
-    Creates a Kubernetes service for the PostgreSQL DB container.
+    Creates a headless service for the PostgreSQL StatefulSet.
     """
     print(f"Creating PostgreSQL service for {service_name}")
 
-    # Define the service for PostgreSQL, exposing port 5432
-    create_container_service(v1, namespace, service_name, [
-        {'port': 5432, 'target_port': 5432, 'name': 'postgresql'}
-    ])
+    service = client.V1Service(
+        metadata=V1ObjectMeta(name=f"{service_name}-service", namespace=namespace),
+        spec=V1ServiceSpec(
+            cluster_ip="None",  # Headless service for StatefulSet
+            selector={"app": service_name},
+            ports=[V1ServicePort(port=5432, target_port=5432, name='postgresql')]
+        )
+    )
 
-    print(f"Service for {service_name} created successfully.")
+    v1.create_namespaced_service(namespace=namespace, body=service)
+    print(f"Headless service for {service_name} created successfully.")
 
-def insert_random_data_into_db(v1, service_name, namespace, max_retries=5, delay=5):
+def insert_random_data_into_db(v1, service_name, namespace):
     """
-    Inserts random data into the PostgreSQL container, retrying if necessary.
+    Inserts random data only into the primary PostgreSQL instance.
     """
-    print(f"Attempting to insert random data into service: {service_name}")
+    print(f"Inserting random data into primary PostgreSQL instance: {service_name}-statefulset-0")
 
-    # Get the full DNS name of the service for database connection
-    db_host = f"{service_name}.static-application.svc.cluster.local"
-
+    db_host = f"{service_name}-statefulset-0.{service_name}-service.{namespace}.svc.cluster.local"
     retries = 0
+    max_retries = 5
     connection = None
+
     while retries < max_retries:
         try:
-            # Attempt to connect to the PostgreSQL service
-            print(f"Connecting to PostgreSQL at {db_host} (Attempt {retries + 1}/{max_retries})")
+            # Connect to the primary PostgreSQL instance
             connection = psycopg2.connect(
                 user="user",
                 password="password",
@@ -272,27 +276,26 @@ def insert_random_data_into_db(v1, service_name, namespace, max_retries=5, delay
             )
             cursor = connection.cursor()
 
-            # Ensure the random_data table exists
+            # Create random data table if not exists
             cursor.execute('''CREATE TABLE IF NOT EXISTS random_data (
                                 id SERIAL PRIMARY KEY,
                                 data VARCHAR(255)
                               );''')
 
-            # Insert random data into the table
+            # Insert random data
             for _ in range(5):
                 random_data = f"RandomData{random.randint(1, 100)}"
                 cursor.execute(f"INSERT INTO random_data (data) VALUES ('{random_data}');")
 
             connection.commit()
-            print(f"Successfully inserted random data into {service_name}")
-            break  # Exit loop on success
+            print(f"Random data inserted into primary PostgreSQL instance: {service_name}-statefulset-0")
+            break
 
         except Exception as e:
-            print(f"Error inserting data into {service_name} on attempt {retries + 1}/{max_retries}: {e}")
+            print(f"Error inserting data into {service_name}-statefulset-0: {e}")
             retries += 1
             if retries < max_retries:
-                print(f"Retrying in {delay} seconds...")
-                time.sleep(delay)
+                time.sleep(5)
 
         finally:
             if connection:
@@ -300,7 +303,7 @@ def insert_random_data_into_db(v1, service_name, namespace, max_retries=5, delay
                 connection.close()
 
     if retries == max_retries:
-        print(f"Failed to insert data into {service_name} after {max_retries} retries.")
+        print(f"Failed to insert data into {service_name}-statefulset-0 after {max_retries} retries.")
 
 def insert_random_data_into_db_replicas(v1, service_name, namespace, replicas):
     """
@@ -310,6 +313,45 @@ def insert_random_data_into_db_replicas(v1, service_name, namespace, replicas):
         replica_name = f"{service_name}-statefulset-{replica}"
         print(f"Inserting random data into {replica_name}")
         insert_random_data_into_db(v1, replica_name, namespace)
+
+def create_headless_service(v1, namespace, service_name):
+    service = client.V1Service(
+        metadata=V1ObjectMeta(name=service_name, namespace=namespace),
+        spec=V1ServiceSpec(
+            cluster_ip="None",  # This makes it headless
+            selector={"app": service_name},
+            ports=[V1ServicePort(port=5432, target_port=5432)]
+        )
+    )
+    v1.create_namespaced_service(namespace=namespace, body=service)
+    print(f"Headless service '{service_name}' created.")
+
+def create_data_insertion_pod(v1, namespace, pod_name, db_service_name):
+    pod = client.V1Pod(
+        metadata=client.V1ObjectMeta(name=pod_name, namespace=namespace),
+        spec=client.V1PodSpec(
+            containers=[
+                client.V1Container(
+                    name="data-inserter",
+                    image="postgres:latest",
+                    command=["psql", "-h", db_service_name, "-U", "user", "-d", "mydatabase", "-c", "INSERT INTO random_data (data) VALUES ('Sample Data');"],
+                    env=[
+                        V1EnvVar(name="POSTGRES_PASSWORD", value="password")
+                    ],
+                    volume_mounts=[V1VolumeMount(mount_path="/var/lib/postgresql/data", name="data-volume")]
+                )
+            ],
+            restart_policy="OnFailure"
+        )
+    )
+    v1.create_namespaced_pod(namespace=namespace, body=pod)
+    print(f"Pod '{pod_name}' created for data insertion into {db_service_name}.")
+
+def delete_pod_and_service(v1, namespace, pod_name, service_name):
+    v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
+    v1.delete_namespaced_service(name=service_name, namespace=namespace)
+    print(f"Pod '{pod_name}' and headless service '{service_name}' deleted.")
+
 
 def calculate_storage_size(data_str):
     # Calculate the size of the JSON data in bytes
@@ -455,7 +497,7 @@ def create_jobs_with_data(batch_v1, namespace, job_name, pvc_name, data_str):
 
 def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, replicas=1):
     """
-    Creates a StatefulSet specifically for PostgreSQL containers, ensuring the proper environment variables and ports are set.
+    Creates a PostgreSQL StatefulSet with primary-replica replication support.
     """
     container = V1Container(
         name=container_name,
@@ -463,7 +505,16 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
         env=[
             V1EnvVar(name="POSTGRES_DB", value="mydatabase"),
             V1EnvVar(name="POSTGRES_USER", value="user"),
-            V1EnvVar(name="POSTGRES_PASSWORD", value="password")
+            V1EnvVar(name="POSTGRES_PASSWORD", value="password"),
+            # Set replication-related environment variables
+            V1EnvVar(name="PGDATA", value="/var/lib/postgresql/data/pgdata"),
+            V1EnvVar(
+                name="POSTGRESQL_PRIMARY_HOST",
+                value=f"{container_name}-statefulset-0.{container_name}-service.{namespace}.svc.cluster.local"
+            ),
+            V1EnvVar(name="POSTGRESQL_REPLICATION_MODE", value="async"),
+            V1EnvVar(name="POSTGRESQL_REPLICATION_USER", value="repluser"),
+            V1EnvVar(name="POSTGRESQL_REPLICATION_PASSWORD", value="replpassword"),
         ],
         ports=[client.V1ContainerPort(container_port=5432)],  # PostgreSQL port
         volume_mounts=[V1VolumeMount(mount_path="/var/lib/postgresql/data", name="data-volume")],  # Volume mount for PostgreSQL data
@@ -660,28 +711,28 @@ def main():
         db_mappedName = container_keys['mappedName']
         replicas = container_keys.get('replicas', 1)
 
-    # Create StatefulSet for PostgreSQL container
+        # Step 1: Create headless service for PostgreSQL container (for replication)
+        create_headless_service(v1, NAMESPACE, db_mappedName)
+
+        # Step 2: Create PostgreSQL StatefulSet with replication support
         pvc_name = f"{db_mappedName}-pvc"
         create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
 
-    # Create PostgreSQL service
+        # Step 3: Wait for all PostgreSQL pods (including the primary) to be ready
+        wait_for_pods_ready(NAMESPACE)
+
+        # Step 4: Insert random data into the primary PostgreSQL instance
+        insert_random_data_into_db(v1, db_mappedName, NAMESPACE)
+
+        # Step 5: Delete the temporary pod and headless service after data insertion
+        pod_name = f"{db_mappedName}-data-inserter-0"
+        delete_pod_and_service(v1, NAMESPACE, pod_name, db_mappedName)
+
+        # Step 6: Create PostgreSQL service after data insertion
         create_db_service(v1, NAMESPACE, db_mappedName)
 
-    # Insert random data into all replicas of the DB container
-        insert_random_data_into_db_replicas(v1, db_mappedName, NAMESPACE, replicas)
-
-
-    
+    # Wait for all StatefulSets to be ready (including DB StatefulSets)
     wait_for_pods_ready(NAMESPACE)
-
-    # for container_name in renamed_containers:
-    #     containerKeys = renamed_containers[container_name]
-    #     mappedName = containerKeys['mappedName']
-    #     containerJob = containerKeys['containerJob']
-    #     replicas = containerKeys['replicas']
-
-    #     insert_random_data_into_db_replicas(v1, db_mappedName, NAMESPACE, replicas)
-
 
     print("All statefulsets, deployments, and services are up in Kubernetes.")
     port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
