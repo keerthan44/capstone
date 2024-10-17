@@ -3,5 +3,6 @@ dummy
 /containers/containers*.json
 /containers/containers*.txt
 **/.env
+*env*
 !**/.sample.env
 **/__pycache__
