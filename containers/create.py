@@ -253,6 +253,113 @@ def create_db_service(v1, namespace, service_name):
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Headless service for {service_name} created successfully.")
 
+def create_postgres_insert_job(batch_v1, namespace, job_name, service_name):
+    """
+    Creates a Kubernetes Job to insert random data into PostgreSQL.
+    """
+
+    # Define the Python script to insert random data into the database
+    python_script = f"""\
+import psycopg2
+import random
+import time
+
+def insert_random_data_into_db(service_name, namespace):
+    print(f"Inserting random data into primary PostgreSQL instance: {{service_name}}-statefulset-0")
+
+    db_host = f"{{service_name}}-service.{{namespace}}.svc.cluster.local"
+    retries = 0
+    max_retries = 5
+    connection = None
+
+    while retries < max_retries:
+        try:
+            connection = psycopg2.connect(
+                user="user",
+                password="password",
+                host=db_host,
+                port="5432",
+                database="mydatabase"
+            )
+            cursor = connection.cursor()
+
+            cursor.execute('''CREATE TABLE IF NOT EXISTS random_data (
+                                id SERIAL PRIMARY KEY,
+                                data VARCHAR(255)
+                              );''')
+
+            for _ in range(5):
+                random_data = f"RandomData{{random.randint(1, 100)}}"
+                cursor.execute(f"INSERT INTO random_data (data) VALUES ('{{random_data}}');")
+
+            connection.commit()
+            print(f"Random data inserted into primary PostgreSQL instance: {{service_name}}-statefulset-0")
+            break
+
+        except Exception as e:
+            print(f"Error inserting data into {{service_name}}-statefulset-0: {{e}}")
+            retries += 1
+            if retries < max_retries:
+                time.sleep(5)
+
+        finally:
+            if connection:
+                cursor.close()
+                connection.close()
+
+    if retries == max_retries:
+        print(f"Failed to insert data into {{service_name}}-statefulset-0 after {{max_retries}} retries.")
+
+insert_random_data_into_db("{service_name}", "{namespace}")
+"""
+
+    # Create a ConfigMap to hold the Python script
+    config_map = client.V1ConfigMap(
+        api_version="v1",
+        kind="ConfigMap",
+        metadata=client.V1ObjectMeta(name=f"{job_name}-script", namespace=namespace),
+        data={"insert_script.py": python_script}
+    )
+
+    # Create the ConfigMap in the specified namespace
+    core_v1 = client.CoreV1Api()
+    core_v1.create_namespaced_config_map(namespace=namespace, body=config_map)
+
+    # Define the Job container to run the Python script
+    container = client.V1Container(
+        name=job_name,
+        image="python:3.9",  # Use a Python image to run the script
+        command=["/bin/bash", "-c", "pip install psycopg2-binary && python /scripts/insert_script.py"],
+        volume_mounts=[client.V1VolumeMount(mount_path="/scripts", name="script-volume")],
+        image_pull_policy="IfNotPresent"
+    )
+
+    # Define the volume for the ConfigMap
+    volume = client.V1Volume(
+        name="script-volume",
+        config_map=client.V1ConfigMapVolumeSource(name=f"{job_name}-script")
+    )
+
+    job_spec = client.V1JobSpec(
+        template=client.V1PodTemplateSpec(
+            spec=client.V1PodSpec(
+                containers=[container],
+                restart_policy="Never",
+                volumes=[volume]
+            )
+        )
+    )
+
+    job = client.V1Job(
+        api_version="batch/v1",
+        kind="Job",
+        metadata=client.V1ObjectMeta(name=job_name, namespace=namespace),
+        spec=job_spec
+    )
+
+    batch_v1.create_namespaced_job(namespace=namespace, body=job)
+    print(f"Kubernetes Job '{job_name}' created in namespace '{namespace}'.")
+
 def insert_random_data_into_db(v1, service_name, namespace):
     """
     Inserts random data only into the primary PostgreSQL instance.
@@ -367,8 +474,10 @@ def calculate_storage_size(data_str):
     # For simplicity, we'll use MiB here
     return f"{size_in_mib + 100}Mi"
 
-def create_pvc(v1, namespace, pvc_name, data_str):
-    size = calculate_storage_size(data_str)
+def create_pvc(v1, namespace, pvc_name, data_str=None):
+    size="1Gi"
+    if data_str:
+        size = calculate_storage_size(data_str)
 
     pvc = client.V1PersistentVolumeClaim(
         metadata=client.V1ObjectMeta(name=pvc_name, namespace=namespace),
@@ -560,7 +669,7 @@ def create_container_statefulset(apps_v1, namespace, container_name, pvc_name, k
             V1EnvVar(name="POD_NAME", value_from=V1EnvVarSource(field_ref=V1ObjectFieldSelector(field_path="metadata.name"))),
         ],
         volume_mounts=[V1VolumeMount(mount_path="/app/data", name="data-volume")],
-        image_pull_policy="Always"
+        image_pull_policy="IfNotPresent"
     )
 
     volume = V1Volume(
@@ -686,12 +795,32 @@ def main():
     wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
     delete_all_configmaps(v1, NAMESPACE)
     delete_completed_jobs(batch_v1, v1, NAMESPACE)
-    print("test")
     
     create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
     # Assign container jobs
     renamed_containers = addContainerJob(renamed_containers)
+
+    # Handle DB containers differently
+    for service_name, container_keys in db_values.items():
+        db_mappedName = container_keys['mappedName']
+        replicas = container_keys.get('replicas', 1)
+
+        # Step 1: Create headless service for PostgreSQL container (for replication)
+        create_container_service(v1, NAMESPACE, db_mappedName, [{ "port": 5432, "target_port": 5432, 'name': 'postgresql' }])
+
+        # Step 2: Create PostgreSQL StatefulSet with replication support
+        pvc_name = f"{db_mappedName}-pvc"
+        create_pvc(v1, NAMESPACE, pvc_name)
+        create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
+    wait_for_pods_ready(NAMESPACE)
+    for service_name, container_keys in db_values.items():
+        db_mappedName = container_keys['mappedName']
+        create_postgres_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
+    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
+    delete_all_configmaps(v1, NAMESPACE)
+    delete_completed_jobs(batch_v1, v1, NAMESPACE)
+    
 
     # Handle non-DB containers
     for container_name in renamed_containers:
@@ -707,30 +836,6 @@ def main():
         # Use apps_v1 for creating StatefulSets
         create_container_statefulset(apps_v1, NAMESPACE, mappedName, pvc_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
 
-    # Handle DB containers differently
-    for service_name, container_keys in db_values.items():
-        db_mappedName = container_keys['mappedName']
-        replicas = container_keys.get('replicas', 1)
-
-        # Step 1: Create headless service for PostgreSQL container (for replication)
-        create_headless_service(v1, NAMESPACE, db_mappedName)
-
-        # Step 2: Create PostgreSQL StatefulSet with replication support
-        pvc_name = f"{db_mappedName}-pvc"
-        create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
-
-        # Step 3: Wait for all PostgreSQL pods (including the primary) to be ready
-        wait_for_pods_ready(NAMESPACE)
-
-        # Step 4: Insert random data into the primary PostgreSQL instance
-        insert_random_data_into_db(v1, db_mappedName, NAMESPACE)
-
-        # Step 5: Delete the temporary pod and headless service after data insertion
-        pod_name = f"{db_mappedName}-data-inserter-0"
-        delete_pod_and_service(v1, NAMESPACE, pod_name, db_mappedName)
-
-        # Step 6: Create PostgreSQL service after data insertion
-        create_db_service(v1, NAMESPACE, db_mappedName)
 
     # Wait for all StatefulSets to be ready (including DB StatefulSets)
     wait_for_pods_ready(NAMESPACE)

@@ -8,3 +8,5 @@ grpcio-tools
 grpcio
 aiohttp
 quart
+psycopg2-binary
+

@@ -69,8 +69,10 @@ async def call_containers(containers, timestamp, start_time):
                     tasks.append(asyncio.create_task(contact_rpc_server(json_data)))
                 case 'db':
                     tasks.append(asyncio.create_task(simulate_db_call(dm_service, json_data)))  # New DB case
-                case _:
+                case "http":
                     tasks.append(asyncio.create_task(make_http_call(json_data)))
+                case _:
+                    pass
         except Exception as e:
             print(f"An unexpected error occurred: {e}")
 
