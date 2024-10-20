@@ -115,7 +115,7 @@ def create_kafka_external_gateway_deployment(apps_v1, namespace):
         env=[
             client.V1EnvVar(name="KAFKA_BROKER", value="localhost:9092")
         ],
-        image_pull_policy="IfNotPresent",  # Set the image pull policy to IfNotPresent
+        image_pull_policy="Always",  # Set the image pull policy to IfNotPresent
     )
     spec = client.V1PodSpec(
         containers=[container]

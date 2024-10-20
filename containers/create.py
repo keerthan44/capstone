@@ -174,7 +174,7 @@ def create_logging_statefulset(apps_v1, namespace, redis_ip):
         image=get_docker_image_with_pre_suffix("logging_capstone"),
         env=[client.V1EnvVar(name="REDIS_IP_ADDRESS", value=redis_ip)],
         ports=[client.V1ContainerPort(container_port=80)],
-        image_pull_policy="IfNotPresent"
+        image_pull_policy="Always"
     )
     
     volume = client.V1Volume(
@@ -895,7 +895,7 @@ def create_container_statefulset(apps_v1, namespace, container_name, pvc_name, k
             V1EnvVar(name="POD_NAME", value_from=V1EnvVarSource(field_ref=V1ObjectFieldSelector(field_path="metadata.name"))),
         ],
         volume_mounts=[V1VolumeMount(mount_path="/app/data", name="data-volume")],
-        image_pull_policy="IfNotPresent"
+        image_pull_policy="Always"
     )
 
     volume = V1Volume(
