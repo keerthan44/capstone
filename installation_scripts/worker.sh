@@ -14,7 +14,7 @@ for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
 done
 
 # Insert gnome-terminal
-sudo apt install -y gnome-terminal
+sudo apt install -y gnome-terminal curl
 
 # Install docker
 curl -fsSL https://get.docker.com -o get-docker.sh
