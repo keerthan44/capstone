@@ -4,7 +4,7 @@ import json
 import random
 from collections import defaultdict
 from kubernetes import client, config
-from kubernetes.client import V1EnvVar, V1EnvVarSource, V1ObjectFieldSelector, V1PersistentVolumeClaimVolumeSource, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1LabelSelector, V1Volume, V1ConfigMapVolumeSource, V1VolumeMount
+from kubernetes.client import V1EnvVar, V1EnvVarSource, V1ObjectFieldSelector, V1PersistentVolumeClaimVolumeSource, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1LabelSelector, V1Volume, V1ConfigMapVolumeSource, V1VolumeMount, V1PodSecurityContext
 from kafka_setup import deploy_kafka_environment, create_topics_http_request
 from utils import wait_for_pods_ready, port_forward_and_exec_func, get_or_create_namespace, wait_for_all_jobs_to_complete, delete_completed_jobs, wait_for_job_completion, get_docker_image_with_pre_suffix, delete_all_configmaps
 from dotenv import load_dotenv
@@ -240,9 +240,9 @@ def create_db_service(v1, namespace, service_name):
     Creates a headless service for the PostgreSQL StatefulSet.
     """
     print(f"Creating PostgreSQL service for {service_name}")
-
+    print(f"{service_name}-headless-service")
     service = client.V1Service(
-        metadata=V1ObjectMeta(name=f"{service_name}-service", namespace=namespace),
+        metadata=V1ObjectMeta(name=f"{service_name}-headless-service", namespace=namespace, labels={"app": service_name}),
         spec=V1ServiceSpec(
             cluster_ip="None",  # Headless service for StatefulSet
             selector={"app": service_name},
@@ -267,7 +267,7 @@ import time
 def insert_random_data_into_db(service_name, namespace):
     print(f"Inserting random data into primary PostgreSQL instance: {{service_name}}-statefulset-0")
 
-    db_host = f"{{service_name}}-service.{{namespace}}.svc.cluster.local"
+    db_host = f"{{service_name}}-primary-0.{{service_name}}-headless-service.{{namespace}}.svc.cluster.local"
     retries = 0
     max_retries = 5
     connection = None
@@ -426,7 +426,7 @@ def create_headless_service(v1, namespace, service_name):
         metadata=V1ObjectMeta(name=service_name, namespace=namespace),
         spec=V1ServiceSpec(
             cluster_ip="None",  # This makes it headless
-            selector={"app": service_name},
+            selector={"app": f"{service_name}"},
             ports=[V1ServicePort(port=5432, target_port=5432)]
         )
     )
@@ -474,7 +474,7 @@ def calculate_storage_size(data_str):
     # For simplicity, we'll use MiB here
     return f"{size_in_mib + 100}Mi"
 
-def create_pvc(v1, namespace, pvc_name, data_str=None):
+def create_pvc(v1, namespace, pvc_name, access_mode=["ReadOnlyMany"], data_str=None):
     size="1Gi"
     if data_str:
         size = calculate_storage_size(data_str)
@@ -482,7 +482,7 @@ def create_pvc(v1, namespace, pvc_name, data_str=None):
     pvc = client.V1PersistentVolumeClaim(
         metadata=client.V1ObjectMeta(name=pvc_name, namespace=namespace),
         spec=client.V1PersistentVolumeClaimSpec(
-            access_modes=['ReadOnlyMany'],
+            access_modes=access_mode,
             resources=client.V1ResourceRequirements(
                 requests={'storage': size}
             )
@@ -604,57 +604,151 @@ def create_jobs_with_data(batch_v1, namespace, job_name, pvc_name, data_str):
 
     print(f"Total {chunks_numbers} jobs created to handle the data.")
 
+def create_db_headless_service(v1, namespace, container_name):
+    service = V1Service(
+        metadata=V1ObjectMeta(name=f"{container_name}-headless-service", namespace=namespace, labels={"app": container_name}),
+        spec=V1ServiceSpec(
+            ports=[
+                V1ServicePort(name="postgresql", port=5432, target_port=5432),
+            ],
+            selector={"app": container_name},
+            cluster_ip="None"  # Makes the service headless
+        )
+    )
+    response = v1.create_namespaced_service(namespace=namespace, body=service)
+    print(f"Headless Kafka Service created in namespace '{namespace}'.")
+    return response.metadata.name  # Return the name of the created service
+
 def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, replicas=1):
     """
-    Creates a PostgreSQL StatefulSet with primary-replica replication support.
+    Creates a PostgreSQL StatefulSet with primary-replica replication support using the Bitnami PostgreSQL image.
+    It first creates the primary StatefulSet, then creates the replica StatefulSet.
     """
-    container = V1Container(
-        name=container_name,
-        image="postgres:latest",  # Use PostgreSQL image
+
+    primary_container = V1Container(
+        name=f"{container_name}-primary",
+        image="bitnami/postgresql:17",  # Use Bitnami PostgreSQL 17 image
         env=[
-            V1EnvVar(name="POSTGRES_DB", value="mydatabase"),
-            V1EnvVar(name="POSTGRES_USER", value="user"),
-            V1EnvVar(name="POSTGRES_PASSWORD", value="password"),
-            # Set replication-related environment variables
-            V1EnvVar(name="PGDATA", value="/var/lib/postgresql/data/pgdata"),
-            V1EnvVar(
-                name="POSTGRESQL_PRIMARY_HOST",
-                value=f"{container_name}-statefulset-0.{container_name}-service.{namespace}.svc.cluster.local"
-            ),
-            V1EnvVar(name="POSTGRESQL_REPLICATION_MODE", value="async"),
+            V1EnvVar(name="POSTGRESQL_PASSWORD", value="password"),
+            V1EnvVar(name="POSTGRESQL_USERNAME", value="user"),
+            V1EnvVar(name="POSTGRESQL_DATABASE", value="mydatabase"),
+            V1EnvVar(name="POSTGRESQL_REPLICATION_MODE", value="master"),  # Set as primary
             V1EnvVar(name="POSTGRESQL_REPLICATION_USER", value="repluser"),
             V1EnvVar(name="POSTGRESQL_REPLICATION_PASSWORD", value="replpassword"),
+            # Logging configuration
+            V1EnvVar(name="POSTGRESQL_LOGGING_COLLECTOR", value="on"),
+            V1EnvVar(name="POSTGRESQL_LOG_MIN_MESSAGES", value="info"),
+            V1EnvVar(name="POSTGRESQL_LOG_STATEMENT", value="all"),  # Log all SQL statements
         ],
         ports=[client.V1ContainerPort(container_port=5432)],  # PostgreSQL port
-        volume_mounts=[V1VolumeMount(mount_path="/var/lib/postgresql/data", name="data-volume")],  # Volume mount for PostgreSQL data
+        volume_mounts=[
+            V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")  # Volume mount for PostgreSQL data
+        ],
         image_pull_policy="IfNotPresent"
     )
 
-    volume = V1Volume(
+    init_container = V1Container(
+        name="init-chown-data",
+        image="bitnami/minideb",  # Minimal Bitnami image to run shell commands
+        command=["/bin/bash", "-c", "chown -R 1001:1001 /bitnami/postgresql/data"],
+        volume_mounts=[
+            V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")
+        ]
+    )
+
+    primary_volume = V1Volume(
         name="data-volume",
         persistent_volume_claim=V1PersistentVolumeClaimVolumeSource(claim_name=pvc_name)
     )
 
-    pod_spec = V1PodSpec(containers=[container], volumes=[volume])
-    template = V1PodTemplateSpec(metadata=V1ObjectMeta(labels={"app": container_name}), spec=pod_spec)
+    primary_pod_spec = V1PodSpec(
+        init_containers=[init_container],
+        containers=[primary_container], 
+        volumes=[primary_volume],
+    )
+    primary_template = V1PodTemplateSpec(
+        metadata=V1ObjectMeta(labels={"app": f"{container_name}", "service": f"{container_name}-primary"}),
+        spec=primary_pod_spec
+    )
 
-    stateful_set_spec = V1StatefulSetSpec(
-        service_name=f"{container_name}-service",
-        replicas=replicas,  # Number of replicas
-        selector=V1LabelSelector(match_labels={"app": container_name}),
-        template=template,
+    primary_stateful_set_spec = V1StatefulSetSpec(
+        service_name=f"{container_name}-headless-service",
+        replicas=1,  # Primary replicas (usually 1)
+        selector=V1LabelSelector(match_labels={"app": f"{container_name}"}),
+        template=primary_template,
         pod_management_policy="OrderedReady",
         update_strategy=client.V1StatefulSetUpdateStrategy(type="RollingUpdate")
     )
 
-    stateful_set = V1StatefulSet(
-        metadata=V1ObjectMeta(name=f"{container_name}-statefulset", namespace=namespace),
-        spec=stateful_set_spec
+    primary_stateful_set = V1StatefulSet(
+        metadata=V1ObjectMeta(name=f"{container_name}-primary", namespace=namespace),
+        spec=primary_stateful_set_spec
     )
 
-    apps_v1.create_namespaced_stateful_set(namespace=namespace, body=stateful_set)
-    print(f"PostgreSQL StatefulSet '{container_name}-statefulset' created in namespace '{namespace}' with {replicas} replicas.")
+    # Create the primary StatefulSet
+    apps_v1.create_namespaced_stateful_set(namespace=namespace, body=primary_stateful_set)
+    print(f"Primary PostgreSQL StatefulSet '{container_name}-primary' created in namespace '{namespace}")
+    replicas -= 1
+    if replicas < 1:
+        return 
+    # Now create the replicas StatefulSet
+    replica_container = V1Container(
+        name=f"{container_name}-replica",
+        image="bitnami/postgresql:17",  # Use Bitnami PostgreSQL 17 image
+        env=[
+            V1EnvVar(name="POSTGRESQL_PASSWORD", value="password"),
+            V1EnvVar(name="POSTGRESQL_USERNAME", value="user"),
+            V1EnvVar(name="POSTGRESQL_DATABASE", value="mydatabase"),
+            V1EnvVar(name="POSTGRESQL_REPLICATION_MODE", value="slave"),  # Set as replica
+            V1EnvVar(name="POSTGRESQL_MASTER_HOST", value=f"{container_name}-primary-0.{container_name}-headless-service.{namespace}.svc.cluster.local"),
+            V1EnvVar(name="POSTGRESQL_MASTER_PORT_NUMBER", value="5432"),  # PostgreSQL port for replication
+            V1EnvVar(name="POSTGRESQL_REPLICATION_USER", value="repluser"),
+            V1EnvVar(name="POSTGRESQL_REPLICATION_PASSWORD", value="replpassword"),
+            # Logging configuration
+            V1EnvVar(name="POSTGRESQL_LOGGING_COLLECTOR", value="on"),
+            V1EnvVar(name="POSTGRESQL_LOG_MIN_MESSAGES", value="info"),
+            V1EnvVar(name="POSTGRESQL_LOG_STATEMENT", value="all"),  # Log all SQL statements
+        ],
+        ports=[client.V1ContainerPort(container_port=5432)],  # PostgreSQL port
+        volume_mounts=[
+            V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")  # Volume mount for PostgreSQL data
+        ],
+        image_pull_policy="IfNotPresent"
+    )
 
+    replica_volume = V1Volume(
+        name="data-volume",
+        persistent_volume_claim=V1PersistentVolumeClaimVolumeSource(claim_name=pvc_name)
+    )
+
+    replica_pod_spec = V1PodSpec(
+        init_containers=[init_container],
+        containers=[replica_container], 
+        volumes=[replica_volume]
+    )
+
+    replica_template = V1PodTemplateSpec(
+        metadata=V1ObjectMeta(labels={"app": f"{container_name}", "service": f"{container_name}-replica"}),
+        spec=replica_pod_spec
+    )
+
+    replica_stateful_set_spec = V1StatefulSetSpec(
+        service_name=f"{container_name}-headless-service",
+        replicas=replicas,  # Replica count
+        selector=V1LabelSelector(match_labels={"app": f"{container_name}"}),
+        template=replica_template,
+        pod_management_policy="OrderedReady",
+        update_strategy=client.V1StatefulSetUpdateStrategy(type="RollingUpdate")
+    )
+
+    replica_stateful_set = V1StatefulSet(
+        metadata=V1ObjectMeta(name=f"{container_name}-replica", namespace=namespace),
+        spec=replica_stateful_set_spec
+    )
+
+    # Create the replica StatefulSet
+    apps_v1.create_namespaced_stateful_set(namespace=namespace, body=replica_stateful_set)
+    print(f"Replica PostgreSQL StatefulSet '{container_name}-replica' created in namespace '{namespace}' with replicas.")
 
 def create_container_statefulset(apps_v1, namespace, container_name, pvc_name, kafka_replicas, redis_ip, container_job, replicas=1):
     container = V1Container(
@@ -789,7 +883,7 @@ def main():
         data_str = json.dumps(data).replace('"', '\\"')
 
         # Create PVC and Jobs for other containers
-        create_pvc(v1, NAMESPACE, pvc_name, data_str)
+        create_pvc(v1, NAMESPACE, pvc_name, data_str=data_str)
         create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
 
     wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
@@ -807,12 +901,14 @@ def main():
         replicas = container_keys.get('replicas', 1)
 
         # Step 1: Create headless service for PostgreSQL container (for replication)
+        create_db_headless_service(v1, NAMESPACE, db_mappedName)
         create_container_service(v1, NAMESPACE, db_mappedName, [{ "port": 5432, "target_port": 5432, 'name': 'postgresql' }])
 
         # Step 2: Create PostgreSQL StatefulSet with replication support
         pvc_name = f"{db_mappedName}-pvc"
-        create_pvc(v1, NAMESPACE, pvc_name)
+        create_pvc(v1, NAMESPACE, pvc_name,access_mode=["ReadWriteOnce"])
         create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
+
     wait_for_pods_ready(NAMESPACE)
     for service_name, container_keys in db_values.items():
         db_mappedName = container_keys['mappedName']

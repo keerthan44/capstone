@@ -20,10 +20,22 @@ async def make_http_call(data):
         print(f"Failed to contact {data['dm_service']}: {e}", file=sys.stderr)
 
 async def make_http_call_to_logging_server(data):
+    print("Entered make_http_call_to_logging_server", file=sys.stderr)
     try:
         async with aiohttp.ClientSession() as session:
+            print("Before post", file=sys.stderr)
             async with session.post(f"http://logging-service/logs", json=data) as response:
-                response_text = await response.text()
-                print(f"Contacted logging_capstone with communication_type {data['communication_type']}: {response_text}", file=sys.stderr)
+                print("After post", file=sys.stderr)
+                # Check if the response status indicates success
+                if response.status == 200:
+                    response_text = await response.text()
+                    print(f"Contacted logging_capstone with communication_type {data.get('communication_type', 'unknown')}: {response_text}", file=sys.stderr)
+                else:
+                    # Log the status code and response if not successful
+                    response_text = await response.text()
+                    print(f"Failed to contact logging_capstone: Received status {response.status}, response: {response_text}", file=sys.stderr)
     except aiohttp.ClientError as e:
-        print(f"Failed to contact logging_capstone: {e}", file=sys.stderr)
+        print(f"Client error occurred while contacting logging_capstone: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"Unexpected error during HTTP call: {e}", file=sys.stderr)
+
