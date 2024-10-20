@@ -9,4 +9,3 @@ grpcio
 aiohttp
 quart
 psycopg2-binary
-

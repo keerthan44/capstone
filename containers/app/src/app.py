@@ -17,6 +17,8 @@ from communication_type.rpc.rpc_server import run_grpc_server_process
 
 from communication_type.db.db_call_client import simulate_db_call
 
+from communication_type.memcached.memcached_client import redis_crud_with_logging
+
 CONTAINER_NAME = os.environ.get("CONTAINER_NAME")
 REDIS_IP = os.environ.get("REDIS_IP_ADDRESS")
 CONTAINER_JOB = os.environ.get("CONTAINER_JOB")
@@ -63,6 +65,8 @@ async def call_containers(containers, timestamp, start_time):
         print(f"Sent request to {dm_service} with communication_type {communication_type}", file=sys.stderr)
         try:
             match communication_type:
+                case 'mc':
+                    tasks.append(asyncio.create_task(redis_crud_with_logging(dm_service, NAMESPACE, json_data)))
                 case 'mq':
                     tasks.append(asyncio.create_task(produce_kafka_messages(NAMESPACE, 'kafka-instance', 'kafka', dm_service, json_data, KAFKA_REPLICAS)))
                 case 'rpc':

@@ -253,6 +253,101 @@ def create_db_service(v1, namespace, service_name):
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Headless service for {service_name} created successfully.")
 
+from kubernetes import client
+
+def create_redis_insert_job(batch_v1, namespace, job_name, service_name):
+    """
+    Creates a Kubernetes Job to insert random data into Redis.
+    """
+
+    # Define the Python script to insert random data into Redis
+    python_script = f"""\
+import redis
+import random
+import time
+
+def insert_random_data_into_redis(service_name, namespace):
+    print(f"Inserting random data into Redis instance: {{service_name}}-master-0")
+
+    redis_host = f"{{service_name}}-master-0.{{service_name}}-headless-service.{{namespace}}.svc.cluster.local"
+    retries = 0
+    max_retries = 5
+
+    while retries < max_retries:
+        try:
+            # Connect to Redis
+            r = redis.Redis(host=redis_host, port=6379, password="Redis", decode_responses=True)
+            
+            # Insert random data into Redis
+            for _ in range(5):
+                random_key = f"random_key_{{random.randint(1, 100)}}"
+                random_value = f"RandomValue{{random.randint(1, 100)}}"
+                r.set(random_key, random_value)
+                print(f"Inserted {{random_key}}: {{random_value}} into Redis")
+
+            print(f"Random data inserted into Redis instance: {{service_name}}-master-0")
+            break
+
+        except Exception as e:
+            print(f"Error inserting data into {{service_name}}-master-0: {{e}}")
+            retries += 1
+            if retries < max_retries:
+                time.sleep(5)
+
+    if retries == max_retries:
+        print(f"Failed to insert data into {{service_name}}-master-0 after {{max_retries}} retries.")
+
+insert_random_data_into_redis("{service_name}", "{namespace}")
+"""
+
+    # Create a ConfigMap to hold the Python script
+    config_map = client.V1ConfigMap(
+        api_version="v1",
+        kind="ConfigMap",
+        metadata=client.V1ObjectMeta(name=f"{job_name}-script", namespace=namespace),
+        data={"insert_script.py": python_script}
+    )
+
+    # Create the ConfigMap in the specified namespace
+    core_v1 = client.CoreV1Api()
+    core_v1.create_namespaced_config_map(namespace=namespace, body=config_map)
+
+    # Define the Job container to run the Python script
+    container = client.V1Container(
+        name=job_name,
+        image="python:3.9",  # Use a Python image to run the script
+        command=["/bin/bash", "-c", "pip install redis && python /scripts/insert_script.py"],
+        volume_mounts=[client.V1VolumeMount(mount_path="/scripts", name="script-volume")],
+        image_pull_policy="IfNotPresent"
+    )
+
+    # Define the volume for the ConfigMap
+    volume = client.V1Volume(
+        name="script-volume",
+        config_map=client.V1ConfigMapVolumeSource(name=f"{job_name}-script")
+    )
+
+    job_spec = client.V1JobSpec(
+        template=client.V1PodTemplateSpec(
+            spec=client.V1PodSpec(
+                containers=[container],
+                restart_policy="Never",
+                volumes=[volume]
+            )
+        )
+    )
+
+    job = client.V1Job(
+        api_version="batch/v1",
+        kind="Job",
+        metadata=client.V1ObjectMeta(name=job_name, namespace=namespace),
+        spec=job_spec
+    )
+
+    batch_v1.create_namespaced_job(namespace=namespace, body=job)
+    print(f"Kubernetes Job '{job_name}' created in namespace '{namespace}'.")
+
+
 def create_postgres_insert_job(batch_v1, namespace, job_name, service_name):
     """
     Creates a Kubernetes Job to insert random data into PostgreSQL.
@@ -360,67 +455,6 @@ insert_random_data_into_db("{service_name}", "{namespace}")
     batch_v1.create_namespaced_job(namespace=namespace, body=job)
     print(f"Kubernetes Job '{job_name}' created in namespace '{namespace}'.")
 
-def insert_random_data_into_db(v1, service_name, namespace):
-    """
-    Inserts random data only into the primary PostgreSQL instance.
-    """
-    print(f"Inserting random data into primary PostgreSQL instance: {service_name}-statefulset-0")
-
-    db_host = f"{service_name}-statefulset-0.{service_name}-service.{namespace}.svc.cluster.local"
-    retries = 0
-    max_retries = 5
-    connection = None
-
-    while retries < max_retries:
-        try:
-            # Connect to the primary PostgreSQL instance
-            connection = psycopg2.connect(
-                user="user",
-                password="password",
-                host=db_host,
-                port="5432",
-                database="mydatabase"
-            )
-            cursor = connection.cursor()
-
-            # Create random data table if not exists
-            cursor.execute('''CREATE TABLE IF NOT EXISTS random_data (
-                                id SERIAL PRIMARY KEY,
-                                data VARCHAR(255)
-                              );''')
-
-            # Insert random data
-            for _ in range(5):
-                random_data = f"RandomData{random.randint(1, 100)}"
-                cursor.execute(f"INSERT INTO random_data (data) VALUES ('{random_data}');")
-
-            connection.commit()
-            print(f"Random data inserted into primary PostgreSQL instance: {service_name}-statefulset-0")
-            break
-
-        except Exception as e:
-            print(f"Error inserting data into {service_name}-statefulset-0: {e}")
-            retries += 1
-            if retries < max_retries:
-                time.sleep(5)
-
-        finally:
-            if connection:
-                cursor.close()
-                connection.close()
-
-    if retries == max_retries:
-        print(f"Failed to insert data into {service_name}-statefulset-0 after {max_retries} retries.")
-
-def insert_random_data_into_db_replicas(v1, service_name, namespace, replicas):
-    """
-    Insert the same random data into all replicas of the PostgreSQL StatefulSet.
-    """
-    for replica in range(replicas):
-        replica_name = f"{service_name}-statefulset-{replica}"
-        print(f"Inserting random data into {replica_name}")
-        insert_random_data_into_db(v1, replica_name, namespace)
-
 def create_headless_service(v1, namespace, service_name):
     service = client.V1Service(
         metadata=V1ObjectMeta(name=service_name, namespace=namespace),
@@ -432,33 +466,6 @@ def create_headless_service(v1, namespace, service_name):
     )
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Headless service '{service_name}' created.")
-
-def create_data_insertion_pod(v1, namespace, pod_name, db_service_name):
-    pod = client.V1Pod(
-        metadata=client.V1ObjectMeta(name=pod_name, namespace=namespace),
-        spec=client.V1PodSpec(
-            containers=[
-                client.V1Container(
-                    name="data-inserter",
-                    image="postgres:latest",
-                    command=["psql", "-h", db_service_name, "-U", "user", "-d", "mydatabase", "-c", "INSERT INTO random_data (data) VALUES ('Sample Data');"],
-                    env=[
-                        V1EnvVar(name="POSTGRES_PASSWORD", value="password")
-                    ],
-                    volume_mounts=[V1VolumeMount(mount_path="/var/lib/postgresql/data", name="data-volume")]
-                )
-            ],
-            restart_policy="OnFailure"
-        )
-    )
-    v1.create_namespaced_pod(namespace=namespace, body=pod)
-    print(f"Pod '{pod_name}' created for data insertion into {db_service_name}.")
-
-def delete_pod_and_service(v1, namespace, pod_name, service_name):
-    v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
-    v1.delete_namespaced_service(name=service_name, namespace=namespace)
-    print(f"Pod '{pod_name}' and headless service '{service_name}' deleted.")
-
 
 def calculate_storage_size(data_str):
     # Calculate the size of the JSON data in bytes
@@ -619,6 +626,21 @@ def create_db_headless_service(v1, namespace, container_name):
     print(f"Headless Kafka Service created in namespace '{namespace}'.")
     return response.metadata.name  # Return the name of the created service
 
+def create_memcached_service(v1, namespace, container_name):
+    service = V1Service(
+        metadata=V1ObjectMeta(name=f"{container_name}-headless-service", namespace=namespace, labels={"app": container_name}),
+        spec=V1ServiceSpec(
+            ports=[
+                V1ServicePort(name="redis", port=6379, target_port=6379),
+            ],
+            selector={"app": container_name},
+            cluster_ip="None"  # Makes the service headless
+        )
+    )
+    response = v1.create_namespaced_service(namespace=namespace, body=service)
+    print(f"Headless Kafka Service created in namespace '{namespace}'.")
+    return response.metadata.name  # Return the name of the created service
+
 def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, replicas=1):
     """
     Creates a PostgreSQL StatefulSet with primary-replica replication support using the Bitnami PostgreSQL image.
@@ -749,6 +771,116 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
     # Create the replica StatefulSet
     apps_v1.create_namespaced_stateful_set(namespace=namespace, body=replica_stateful_set)
     print(f"Replica PostgreSQL StatefulSet '{container_name}-replica' created in namespace '{namespace}' with replicas.")
+
+def create_redis_statefulset(apps_v1, namespace, container_name, pvc_name, replicas=1):
+    """
+    Creates a Redis StatefulSet with master-slave replication support.
+    It first creates the master StatefulSet, then creates the replica StatefulSet.
+    """
+
+    # Redis master configuration
+    master_container = client.V1Container(
+        name=f"{container_name}-master",
+        image="bitnami/redis:latest",  # Use Redis image
+        ports=[client.V1ContainerPort(container_port=6379)],  # Redis port
+        volume_mounts=[
+            client.V1VolumeMount(mount_path="/data", name="data-volume")  # Volume mount for Redis data
+        ],
+        image_pull_policy="IfNotPresent",
+        env=[
+            client.V1EnvVar(name="REDIS_PASSWORD", value="Redis"),  # Redis port for replication
+            client.V1EnvVar(name="REDIS_MASTER_PASSWORD", value="Redis"),  # Redis port for replication
+            client.V1EnvVar(name="REDIS_REPLICATION_MODE", value="master"),
+        ]
+    )
+
+    master_volume = client.V1Volume(
+        name="data-volume",
+        persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(claim_name=pvc_name)
+    )
+
+    master_pod_spec = client.V1PodSpec(
+        containers=[master_container],
+        volumes=[master_volume],
+    )
+
+    master_template = client.V1PodTemplateSpec(
+        metadata=client.V1ObjectMeta(labels={"app": f"{container_name}", "service": f"{container_name}-master"}),
+        spec=master_pod_spec
+    )
+
+    master_stateful_set_spec = client.V1StatefulSetSpec(
+        service_name=f"{container_name}-headless-service",
+        replicas=1,  # Master replicas (usually 1)
+        selector=client.V1LabelSelector(match_labels={"app": f"{container_name}"}),
+        template=master_template,
+        pod_management_policy="OrderedReady",
+        update_strategy=client.V1StatefulSetUpdateStrategy(type="RollingUpdate")
+    )
+
+    master_stateful_set = client.V1StatefulSet(
+        metadata=client.V1ObjectMeta(name=f"{container_name}-master", namespace=namespace),
+        spec=master_stateful_set_spec
+    )
+
+    # Create the master StatefulSet
+    apps_v1.create_namespaced_stateful_set(namespace=namespace, body=master_stateful_set)
+    print(f"Master Redis StatefulSet '{container_name}-master' created in namespace '{namespace}'")
+
+    replicas -= 1
+    if replicas < 1:
+        return
+
+    # Now create the replicas StatefulSet
+    replica_container = client.V1Container(
+        name=f"{container_name}-slave",
+        image="bitnami/redis:latest",  # Use Redis image
+        ports=[client.V1ContainerPort(container_port=6379)],  # Redis port
+        volume_mounts=[
+            client.V1VolumeMount(mount_path="/data", name="data-volume")  # Volume mount for Redis data
+        ],
+        image_pull_policy="IfNotPresent",
+        env=[
+            client.V1EnvVar(name="REDIS_PASSWORD", value="Redis"),  # Redis port for replication
+            client.V1EnvVar(name="REDIS_MASTER_PASSWORD", value="Redis"),  # Redis port for replication
+            client.V1EnvVar(name="REDIS_REPLICATION_MODE", value="slave"),
+            client.V1EnvVar(name="REDIS_MASTER_HOST", value=f"{container_name}-master-0.{container_name}-headless-service.{namespace}.svc.cluster.local"),
+            client.V1EnvVar(name="REDIS_MASTER_PORT", value="6379"),  # Redis port for replication
+        ]
+    )
+
+    replica_volume = client.V1Volume(
+        name="data-volume",
+        persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(claim_name=pvc_name)
+    )
+
+    replica_pod_spec = client.V1PodSpec(
+        containers=[replica_container],
+        volumes=[replica_volume],
+    )
+
+    replica_template = client.V1PodTemplateSpec(
+        metadata=client.V1ObjectMeta(labels={"app": f"{container_name}", "service": f"{container_name}-replica"}),
+        spec=replica_pod_spec
+    )
+
+    replica_stateful_set_spec = client.V1StatefulSetSpec(
+        service_name=f"{container_name}-headless-service",
+        replicas=replicas,  # Replica count
+        selector=client.V1LabelSelector(match_labels={"app": f"{container_name}"}),
+        template=replica_template,
+        pod_management_policy="OrderedReady",
+        update_strategy=client.V1StatefulSetUpdateStrategy(type="RollingUpdate")
+    )
+
+    replica_stateful_set = client.V1StatefulSet(
+        metadata=client.V1ObjectMeta(name=f"{container_name}-replica", namespace=namespace),
+        spec=replica_stateful_set_spec
+    )
+
+    # Create the replica StatefulSet
+    apps_v1.create_namespaced_stateful_set(namespace=namespace, body=replica_stateful_set)
+    print(f"Replica Redis StatefulSet '{container_name}-replica' created in namespace '{namespace}' with {replicas} replicas.")
 
 def create_container_statefulset(apps_v1, namespace, container_name, pvc_name, kafka_replicas, redis_ip, container_job, replicas=1):
     container = V1Container(
@@ -886,14 +1018,19 @@ def main():
         create_pvc(v1, NAMESPACE, pvc_name, data_str=data_str)
         create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
 
-    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
-    delete_all_configmaps(v1, NAMESPACE)
-    delete_completed_jobs(batch_v1, v1, NAMESPACE)
-    
-    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
+    # Handle DB containers differently
+    for service_name, container_keys in memcached_values.items():
+        memcached_mappedName = container_keys['mappedName']
+        replicas = container_keys.get('replicas', 1)
 
-    # Assign container jobs
-    renamed_containers = addContainerJob(renamed_containers)
+        # Step 1: Create headless service for PostgreSQL container (for replication)
+        create_memcached_service(v1, NAMESPACE, memcached_mappedName)
+        create_container_service(v1, NAMESPACE, memcached_mappedName, [{ "port": 6379, "target_port": 6379, 'name': 'redis-port' }])
+
+        # # Step 2: Create PostgreSQL StatefulSet with replication support
+        pvc_name = f"{memcached_mappedName}-pvc"
+        create_pvc(v1, NAMESPACE, pvc_name,access_mode=["ReadWriteOnce"])
+        create_redis_statefulset(apps_v1, NAMESPACE, memcached_mappedName, pvc_name, replicas=replicas)
 
     # Handle DB containers differently
     for service_name, container_keys in db_values.items():
@@ -908,8 +1045,14 @@ def main():
         pvc_name = f"{db_mappedName}-pvc"
         create_pvc(v1, NAMESPACE, pvc_name,access_mode=["ReadWriteOnce"])
         create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
-
+    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
+    delete_all_configmaps(v1, NAMESPACE)
+    delete_completed_jobs(batch_v1, v1, NAMESPACE)
     wait_for_pods_ready(NAMESPACE)
+    for service_name, container_keys in memcached_values.items():
+        db_mappedName = container_keys['mappedName']
+        create_redis_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
+
     for service_name, container_keys in db_values.items():
         db_mappedName = container_keys['mappedName']
         create_postgres_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
@@ -917,6 +1060,10 @@ def main():
     delete_all_configmaps(v1, NAMESPACE)
     delete_completed_jobs(batch_v1, v1, NAMESPACE)
     
+    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
+
+    # Assign container jobs
+    renamed_containers = addContainerJob(renamed_containers)
 
     # Handle non-DB containers
     for container_name in renamed_containers:
