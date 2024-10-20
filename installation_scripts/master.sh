@@ -4,7 +4,15 @@ set -e
 set -x
 
 # Uninstall old versions
-for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do sudo apt-get remove $pkg; done
+for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
+    if dpkg -l | grep -q "^ii  $pkg "; then
+        echo "Removing $pkg..."
+        sudo apt-get remove -y $pkg
+    else
+        echo "$pkg is not installed."
+    fi
+done
+
 
 # Insert gnome-terminal
 sudo apt install -y gnome-terminal
