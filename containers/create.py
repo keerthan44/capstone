@@ -168,7 +168,7 @@ def create_logging_service(v1, namespace):
     v1.create_namespaced_service(namespace=namespace, body=service)
     print(f"Logging Service created in namespace '{namespace}'.")
 
-def create_logging_statefulset(apps_v1, namespace, redis_ip):
+def create_logging_statefulset(apps_v1, namespace, redis_ip, storageclass):
     container = V1Container(
         name="logging-container",
         image=get_docker_image_with_pre_suffix("logging_capstone"),
@@ -196,7 +196,8 @@ def create_logging_statefulset(apps_v1, namespace, redis_ip):
                 access_modes=["ReadWriteOnce"],
                 resources=client.V1ResourceRequirements(
                     requests={"storage": "1Gi"}
-                )
+                ),
+                storage_class_name=storageclass
             )
         )],
         pod_management_policy="OrderedReady",
@@ -481,7 +482,7 @@ def calculate_storage_size(data_str):
     # For simplicity, we'll use MiB here
     return f"{size_in_mib + 100}Mi"
 
-def create_pvc(v1, namespace, pvc_name, access_mode=["ReadOnlyMany"], data_str=None):
+def create_pvc(v1, namespace, pvc_name, storage_class, access_mode=["ReadOnlyMany"], data_str=None):
     size="1Gi"
     if data_str:
         size = calculate_storage_size(data_str)
@@ -492,7 +493,8 @@ def create_pvc(v1, namespace, pvc_name, access_mode=["ReadOnlyMany"], data_str=N
             access_modes=access_mode,
             resources=client.V1ResourceRequirements(
                 requests={'storage': size}
-            )
+            ),
+            storage_class_name=storage_class
         )
     )
 
@@ -971,6 +973,7 @@ def split_calls_to_replicas(data, replicas, mappedName, choice):
 def main():
     NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
     KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "32092"))
+    STORAGE_CLASS = "nfs-client"
     config.load_kube_config()
 
     v1 = client.CoreV1Api()
@@ -990,7 +993,7 @@ def main():
     wait_for_pods_ready(NAMESPACE)
 
     # Call logging service setup (after Redis is ready)
-    create_logging_statefulset(apps_v1, NAMESPACE, redis_ip=redis_service_name)
+    create_logging_statefulset(apps_v1, NAMESPACE, STORAGE_CLASS, redis_ip=redis_service_name)
     create_logging_service(v1, NAMESPACE)
 
     # Get containers and calls data
@@ -1015,7 +1018,7 @@ def main():
         data_str = json.dumps(data).replace('"', '\\"')
 
         # Create PVC and Jobs for other containers
-        create_pvc(v1, NAMESPACE, pvc_name, data_str=data_str)
+        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, data_str=data_str)
         create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
 
     # Handle DB containers differently
@@ -1029,7 +1032,7 @@ def main():
 
         # # Step 2: Create PostgreSQL StatefulSet with replication support
         pvc_name = f"{memcached_mappedName}-pvc"
-        create_pvc(v1, NAMESPACE, pvc_name,access_mode=["ReadWriteOnce"])
+        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
         create_redis_statefulset(apps_v1, NAMESPACE, memcached_mappedName, pvc_name, replicas=replicas)
 
     # Handle DB containers differently
@@ -1043,7 +1046,7 @@ def main():
 
         # Step 2: Create PostgreSQL StatefulSet with replication support
         pvc_name = f"{db_mappedName}-pvc"
-        create_pvc(v1, NAMESPACE, pvc_name,access_mode=["ReadWriteOnce"])
+        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
         create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
     wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
     delete_all_configmaps(v1, NAMESPACE)

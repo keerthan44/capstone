@@ -13,7 +13,6 @@ for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
     fi
 done
 
-
 # Insert gnome-terminal
 sudo apt install -y gnome-terminal
 # Install Python

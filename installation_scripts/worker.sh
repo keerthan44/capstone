@@ -36,7 +36,11 @@ sudo apt-mark hold kubelet kubeadm kubectl
 # Enable kubelet service
 sudo systemctl enable kubelet
 sudo rm  -f /etc/containerd/config.toml
+sudo containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
+sudo sed -e 's/SystemdCgroup = false/SystemdCgroup = true/g' -i /etc/containerd/config.toml
+sudo systemctl daemon-reload
 sudo systemctl restart containerd
+sudo systemctl enable containerd 
 
 
 echo "Enter the kubeadm join command with sudo to connect this worker node to cluster"
