@@ -39,4 +39,4 @@ spec:
   resources:
     requests:
       storage: 1Gi  # Specify the desired size
-  storageClassName: ntfs-client  # Reference the storage class for dynamic provisioning
+  storageClassName: nfs-client  # Reference the storage class for dynamic provisioning
