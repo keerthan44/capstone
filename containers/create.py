@@ -989,7 +989,8 @@ def main():
     renamed_containers, calls = get_and_rename_containers()
 
     # Deploy Redis and get redis_ip
-    redis_service_name, = deploy_redis_environment(NAMESPACE, v1, apps_v1)
+    deploy_redis_environment(NAMESPACE, v1, apps_v1)
+    redis_serive_name = 'redis-service'
     wait_for_pods_ready(NAMESPACE)
 
     # Call logging service setup (after Redis is ready)
