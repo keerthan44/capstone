@@ -994,7 +994,8 @@ def main():
     wait_for_pods_ready(NAMESPACE)
 
     # Call logging service setup (after Redis is ready)
-    create_logging_statefulset(apps_v1, NAMESPACE, STORAGE_CLASS, redis_ip=redis_service_name)
+    print(redis_service_name)
+    create_logging_statefulset(apps_v1, NAMESPACE, redis_service_name, STORAGE_CLASS)
     create_logging_service(v1, NAMESPACE)
 
     # Get containers and calls data
