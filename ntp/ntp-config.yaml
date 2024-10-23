@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ntp
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: ntp
+  template:
+    metadata:
+      labels:
+        app: ntp
+    spec:
+      containers:
+      - name: ntp
+        image: ntp:latest  # Ensure this is a suitable image
+        command: ["/usr/sbin/ntpd", "-g", "-n"]  # Continuous operation
+        volumeMounts:
+        - name: ntp-config
+          mountPath: /etc/ntp.conf  # Mount NTP configuration if needed
+          subPath: ntp.conf
+      volumes:
+      - name: ntp-config
+        configMap:
+          name: ntp-config-map  # Ensure this ConfigMap exists if used
+      hostNetwork: true
+      restartPolicy: Always  # Optional: ensures it restarts on failure
