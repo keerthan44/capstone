@@ -144,7 +144,7 @@ def create_kafka_external_gateway_service(v1, namespace, kafka_external_gateway_
     service_spec = client.V1ServiceSpec(
         selector={"app": "kafka-external-gateway"},
         ports=[client.V1ServicePort(port=80, target_port=8080, node_port=kafka_external_gateway_nodeport)],
-        type="LoadBalancer"
+        type="NodePort"
     )
     service = client.V1Service(
         metadata=client.V1ObjectMeta(name="kafka-external-gateway", namespace=namespace),
