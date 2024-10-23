@@ -973,6 +973,7 @@ def split_calls_to_replicas(data, replicas, mappedName, choice):
 def main():
     NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
     KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "32092"))
+    NODE_IP = os.getenv("NODE_IP", "localhost")
     STORAGE_CLASS = "nfs-client"
     config.load_kube_config()
 
@@ -1065,7 +1066,7 @@ def main():
     delete_all_configmaps(v1, NAMESPACE)
     delete_completed_jobs(batch_v1, v1, NAMESPACE)
     
-    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
+    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT, NODE_IP)
 
     # Assign container jobs
     renamed_containers = addContainerJob(renamed_containers)
