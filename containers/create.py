@@ -990,7 +990,7 @@ def main():
 
     # Deploy Redis and get redis_ip
     deploy_redis_environment(NAMESPACE, v1, apps_v1)
-    redis_serive_name = 'redis-service'
+    redis_service_name = 'redis-service'
     wait_for_pods_ready(NAMESPACE)
 
     # Call logging service setup (after Redis is ready)
