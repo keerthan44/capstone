@@ -17,12 +17,26 @@ spec:
         image: ntp:latest  # Ensure this is a suitable image
         command: ["/usr/sbin/ntpd", "-g", "-n"]  # Continuous operation
         volumeMounts:
-        - name: ntp-config
+        - name: ntp-storage
           mountPath: /etc/ntp.conf  # Mount NTP configuration if needed
           subPath: ntp.conf
       volumes:
-      - name: ntp-config
-        configMap:
-          name: ntp-config-map  # Ensure this ConfigMap exists if used
+      - name: ntp-storage
+        persistentVolumeClaim:
+          claimName: ntp-pvc  # Reference the PVC created
       hostNetwork: true
       restartPolicy: Always  # Optional: ensures it restarts on failure
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ntp-pvc
+  namespace: kube-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi  # Specify the desired size
+  storageClassName: ntfs-client  # Reference the storage class for dynamic provisioning
