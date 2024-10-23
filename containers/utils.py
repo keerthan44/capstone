@@ -183,7 +183,7 @@ def get_minikube_service_ip_port(service_name, namespace):
         else:
             print("Failed to parse URL")
             return None, None
-    except subprocess.CalledProcessError as e:
+    except:
         print(f"Failed to retrieve Minikube service IP: {e}")
         return None, None
 
