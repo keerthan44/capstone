@@ -4,7 +4,7 @@ import json
 import random
 from collections import defaultdict
 from kubernetes import client, config
-from kubernetes.client import V1EnvVar, V1EnvVarSource, V1ObjectFieldSelector, V1PersistentVolumeClaimVolumeSource, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1LabelSelector, V1Volume, V1ConfigMapVolumeSource, V1VolumeMount, V1PodSecurityContext
+from kubernetes.client import V1EnvVar, V1EnvVarSource, V1ObjectFieldSelector, V1PersistentVolumeClaimVolumeSource, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1LabelSelector, V1Volume, V1ConfigMapVolumeSource, V1VolumeMount, V1SecurityContext
 from kafka_setup import deploy_kafka_environment, create_topics_http_request
 from utils import wait_for_pods_ready, port_forward_and_exec_func, get_or_create_namespace, wait_for_all_jobs_to_complete, delete_completed_jobs, wait_for_job_completion, get_docker_image_with_pre_suffix, delete_all_configmaps
 from dotenv import load_dotenv
@@ -677,7 +677,10 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
         command=["/bin/bash", "-c", "chown -R 1001:1001 /bitnami/postgresql/data"],
         volume_mounts=[
             V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")
-        ]
+        ],
+        security_context=V1SecurityContext(
+        run_as_user=0  # Run as root user (UID 0)
+        )
     )
 
     primary_volume = V1Volume(

@@ -13,6 +13,11 @@ for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
     fi
 done
 
+#NTP SERVER
+sudo apt install -y ntp
+sudo systemctl start ntp
+sudo systemctl enable ntp
+
 # Insert gnome-terminal
 sudo apt install -y gnome-terminal curl
 
