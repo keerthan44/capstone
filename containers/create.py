@@ -673,15 +673,18 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
 
     init_container = V1Container(
         name="init-chown-data",
-        image="bitnami/minideb",  # Minimal Bitnami image to run shell commands
-        command=["/bin/bash", "-c", "chown -R 1001:1001 /bitnami/postgresql/data"],
+        image="bitnami/minideb",
+        command=["/bin/bash", "-c", "ls -la /bitnami/postgresql/data"],
         volume_mounts=[
             V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")
         ],
         security_context=V1SecurityContext(
-        run_as_user=0  # Run as root user (UID 0)
+            run_as_user=0,
+            run_as_group=0,
+            privileged=True
         )
     )
+
 
     primary_volume = V1Volume(
         name="data-volume",
