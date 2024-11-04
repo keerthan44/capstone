@@ -33,7 +33,7 @@ async def delete_all_resources(namespace):
     tasks = []
     # Resources to delete
     resource_types = {
-        'persistentvolumeclaim': (v1, v1.delete_namespaced_persistent_volume_claim, v1.list_namespaced_persistent_volume_claim),
+        # 'persistentvolumeclaim': (v1, v1.delete_namespaced_persistent_volume_claim, v1.list_namespaced_persistent_volume_claim),
         'service': (v1, v1.delete_namespaced_service, v1.list_namespaced_service),
         'replicaset': (apps_v1, apps_v1.delete_namespaced_replica_set, apps_v1.list_namespaced_replica_set),
         'deployment': (apps_v1, apps_v1.delete_namespaced_deployment, apps_v1.list_namespaced_deployment),  # Include Deployments
@@ -52,7 +52,6 @@ async def delete_all_resources(namespace):
     for resource_type, (api_instance, delete_func, list_func) in resource_types.items():
         try:
             # Fetch all resources of this type in the namespace
-
             resources = list_func(namespace=namespace).items
 
             # Create async tasks for deleting the resources
@@ -95,8 +94,8 @@ def check_active_pods(namespace):
     try:
         # List all pods in the specified namespace
         while True:
-            active_pods = v1.list_namespaced_pod(namespace=namespace)
-            if active_pods.items:
+            active_pods = v1.list_namespaced_pod(namespace=namespace).items
+            if active_pods:
                 print("Waiting for pods to terminate")
                 time.sleep(2)
             else:
@@ -105,9 +104,24 @@ def check_active_pods(namespace):
         print(f"Failed to check active pods: {e}", file=sys.stderr)
         return False
 
+async def delete_pvc(namespace):
+    """Delete PVCs in the namespace after ensuring all pods are terminated."""
+    try:
+        # List all PVCs in the namespace
+        pvcs = v1.list_namespaced_persistent_volume_claim(namespace).items
+        for pvc in pvcs:
+            await delete_resource(v1, v1.delete_namespaced_persistent_volume_claim, 'pvc', pvc.metadata.name, namespace)
+    except ApiException as e:
+        print(f"Failed to delete PVCs: {e}", file=sys.stderr)
+
 if __name__ == '__main__':
     namespace = os.getenv("KUBERNETES_NAMESPACE", 'static-application')  # Specify the namespace to delete resources from
 
     # Ensure that the namespace is completely deleted
     asyncio.run(ensure_namespace_deleted(namespace))
+
+    # Wait for all pods to terminate before deleting PVCs
     check_active_pods(namespace)
+
+    # Delete PVCs after ensuring all pods are terminated
+    asyncio.run(delete_pvc(namespace))
