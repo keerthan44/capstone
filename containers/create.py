@@ -4,7 +4,7 @@ import json
 import random
 from collections import defaultdict
 from kubernetes import client, config
-from kubernetes.client import V1EnvVar, V1EnvVarSource, V1ObjectFieldSelector, V1PersistentVolumeClaimVolumeSource, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1LabelSelector, V1Volume, V1ConfigMapVolumeSource, V1VolumeMount, V1SecurityContext, V1Lifecycle, V1LifecycleHandler, V1ExecAction
+from kubernetes.client import V1EnvVar, V1EnvVarSource, V1ObjectFieldSelector, V1PersistentVolumeClaimVolumeSource, V1Container, V1ObjectMeta, V1PodSpec, V1Service, V1ServiceSpec, V1ServicePort, V1StatefulSet, V1StatefulSetSpec, V1PodTemplateSpec, V1LabelSelector, V1Volume, V1ConfigMapVolumeSource, V1VolumeMount, V1SecurityContext
 from kafka_setup import deploy_kafka_environment, create_topics_http_request
 from utils import wait_for_pods_ready, port_forward_and_exec_func, get_or_create_namespace, wait_for_all_jobs_to_complete, delete_completed_jobs, wait_for_job_completion, get_docker_image_with_pre_suffix, delete_all_configmaps
 from dotenv import load_dotenv
@@ -12,6 +12,7 @@ from redis_setup import deploy_redis_environment, set_start_time_redis
 import psycopg2
 import random
 import time
+
 
 load_dotenv()  # take environment variables from .env.
 
@@ -647,15 +648,7 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
     Creates a PostgreSQL StatefulSet with primary-replica replication support using the Bitnami PostgreSQL image.
     It first creates the primary StatefulSet, then creates the replica StatefulSet.
     """
-    lifecycle=V1Lifecycle(
-        pre_stop=V1LifecycleHandler(
-            _exec=V1ExecAction(
-                command=["/bin/bash", "-c", "chown -R 65534:0 /bitnami/postgresql/data || true; chmod -R 777 /bitnami/postgresql/data"]
-            )
-        )
-    )
 
-    # Define the lifecycle with a postStop handler correctly
     primary_container = V1Container(
         name=f"{container_name}-primary",
         image="bitnami/postgresql:17",  # Use Bitnami PostgreSQL 17 image
@@ -676,22 +669,27 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
             V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")  # Volume mount for PostgreSQL data
         ],
         image_pull_policy="IfNotPresent",
-        lifecycle=lifecycle
+        security_context=V1SecurityContext(
+            run_as_user=0,
+            run_as_group=0,
+            privileged=True
+        )
     )
 
     init_container = V1Container(
         name="init-chown-data",
         image="bitnami/minideb",
-        command=["/bin/bash", "-c", "chown -R 1001:1001 /bitnami/postgresql/data"],
+        command=["/bin/bash", "-c", "chown -R 1001:1001 /bitnami/postgresql/data | true;"],
         volume_mounts=[
             V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")
         ],
         security_context=V1SecurityContext(
-            run_as_user=0,  # Running as root to change permissions
+            run_as_user=0,
             run_as_group=0,
             privileged=True
         )
     )
+
 
     primary_volume = V1Volume(
         name="data-volume",
@@ -751,26 +749,16 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
             V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")  # Volume mount for PostgreSQL data
         ],
         image_pull_policy="IfNotPresent",
-        lifecycle=lifecycle
+        security_context=V1SecurityContext(
+            run_as_user=0,
+            run_as_group=0,
+            privileged=True
+        )
     )
 
     replica_volume = V1Volume(
         name="data-volume",
         persistent_volume_claim=V1PersistentVolumeClaimVolumeSource(claim_name=pvc_name)
-    )
-
-    replica_init_container = V1Container(
-        name="init-chown-data",
-        image="bitnami/minideb",
-        command=["/bin/bash", "-c", "chown -R 1001:1001 /bitnami/postgresql/data && chmod -R 777 /bitnami/postgresql/data"],
-        volume_mounts=[
-            V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")
-        ],
-        security_context=V1SecurityContext(
-            run_as_user=65534,
-            run_as_group=65534,
-            privileged=True
-        )
     )
 
     replica_pod_spec = V1PodSpec(
@@ -1027,7 +1015,7 @@ def main():
     create_logging_statefulset(apps_v1, NAMESPACE, redis_service_name, STORAGE_CLASS)
     create_logging_service(v1, NAMESPACE)
 
-    # # # Get containers and calls data
+    # Get containers and calls data
     db_values, memcached_values = extract_remove_memcached_db_containers(renamed_containers, calls)
     
     # Random or round robin choice

@@ -28,11 +28,11 @@ spec:
             - name: PROVISIONER_NAME
               value: k8s-sigs.io/nfs-subdir-external-provisioner
             - name: NFS_SERVER
-              value: "10.10.3.25"  # New NFS server IP address
+              value: "10.10.3.30"  # New NFS server IP address
             - name: NFS_PATH
-              value: /mnt/PESIT/data  # New NFS path
+              value: /mnt/PESIT/nfs  # New NFS path
       volumes:
         - name: nfs-client-root
           nfs:
-            server: "10.10.3.25"  # New NFS server IP address
-            path: /mnt/PESIT/data  # New NFS path
+            server: "10.10.3.30"  # New NFS server IP address
+            path: /mnt/PESIT/nfs  # New NFS path
