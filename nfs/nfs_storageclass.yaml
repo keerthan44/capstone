@@ -5,3 +5,11 @@ metadata:
 provisioner: k8s-sigs.io/nfs-subdir-external-provisioner
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
+parameters:
+  archiveOnDelete: "false"
+mountOptions:
+  - async            # Enables asynchronous writes, which can improve performance
+  - noatime          # Disables access time updates to reduce disk I/O
+  - nodiratime       # Disables directory access time updates to reduce disk I/O
+  - hard             # Ensures the NFS client retries indefinitely if server becomes unreachable
+  - intr             # Allows requests to be interrupted if the server is unreachable
