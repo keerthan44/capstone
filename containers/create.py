@@ -683,7 +683,7 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
     init_container = V1Container(
         name="init-chown-data",
         image="bitnami/minideb",
-        command=["/bin/bash", "-c", "chown -R 1001:1001 /bitnami/postgresql/data"],
+        command=["/bin/bash", "-c", "chown -R 1001:1001 /bitnami/postgresql/data || true;"],
         volume_mounts=[
             V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")
         ],
