@@ -2,6 +2,8 @@ dummy
 /containers/calls*.json
 /containers/containers*.json
 /containers/containers*.txt
+/containers/probabilities*.json
+
 **/.env
 *env*
 !**/.sample.env
