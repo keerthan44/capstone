@@ -1,7 +1,9 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template , redirect , url_for
 import json
 import pandas as pd
 import os
+from collections import defaultdict
+
 
 app = Flask(__name__)
 
@@ -12,6 +14,10 @@ def index():
 @app.route('/v2022')
 def v2022_form():
     return render_template('v2022.html')
+
+@app.route('/probabilities_form')
+def probabilities_form():
+    return render_template('probabilities.html')
 
 @app.route('/upload', methods=['POST'])
 def upload():
@@ -159,6 +165,37 @@ def v2022():
         "calls": result,
         "containers": containers_json
     })
+
+@app.route('/probabilities', methods=['GET', 'POST'])
+def probabilities():
+    if request.method == 'GET':
+        return redirect(url_for('probabilities_form'))
+    
+    file = request.files.get('file')
+    if not file:
+        return "JSON file is required", 400
+    
+    data = json.load(file)
+    probability_results = {}
+
+    for service, timestamps in data.items():
+        communication_counter = defaultdict(int)
+
+        for interactions in timestamps.values():
+            for interaction in interactions:
+                communication_type = interaction['communication_type']
+                communication_counter[communication_type] += 1
+
+        total_calls = sum(communication_counter.values())
+        probabilities = {comm_type: round(count / total_calls, 3) for comm_type, count in communication_counter.items()}
+        
+        probability_results[service] = probabilities
+
+    with open('../containers/probabilities.json', 'w') as f:
+        json.dump(probability_results, f, indent=4)
+
+    return jsonify(probability_results)
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True, port=3000)

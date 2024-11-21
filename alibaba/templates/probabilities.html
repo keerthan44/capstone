@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JSON Probability Processor</title>
+  </head>
+  <body>
+    <h1>Upload JSON File to Calculate Probabilities</h1>
+    <form action="/probabilities" method="post" enctype="multipart/form-data">
+      <label for="file">Upload the JSON file</label>
+      <input type="file" name="file" accept=".json" required />
+      <br /><br />
+      <button type="submit">Calculate Probabilities</button>
+    </form>
+    <hr />
+    <div id="data-display"></div>
+
+    <script>
+      const form = document.querySelector('form');
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const formData = new FormData(form);
+        fetch('/probabilities', {
+          method: 'POST',
+          body: formData,
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            const display = document.getElementById('data-display');
+            display.innerHTML =
+              '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+          })
+          .catch((error) => console.error('Error:', error));
+      });
+    </script>
+  </body>
+</html>
