@@ -999,6 +999,108 @@ def split_calls_to_replicas(data, replicas, mappedName, choice):
     
     return result
 
+
+def segregate_receiving_services(calls_file, probabilities_file):
+    # Load JSON files
+    with open(calls_file, 'r') as calls_f, open(probabilities_file, 'r') as probs_f:
+        calls_data = json.load(calls_f)
+        probabilities_data = json.load(probs_f)
+    
+    # Create a dictionary to segregate services by received communication type
+    segregated_services = {comm_type: [] for comm_type in ["http", "mc", "rpc", "db", "mq"]}
+
+    # Iterate over the services in calls.json to identify receiving services
+    for sender_service, timestamps in calls_data.items():
+        for timestamp, calls in timestamps.items():
+            for call in calls:
+                receiver_service = call["dm_service"]
+                communication_type = call["communication_type"]
+
+                # Check if the receiver has the allowed communication type in probabilities.json
+                allowed_types = probabilities_data.get(receiver_service, {})
+                if communication_type in allowed_types:
+                    segregated_services[communication_type].append(receiver_service)
+
+    # Remove duplicates in each communication type's list
+    for comm_type in segregated_services:
+        segregated_services[comm_type] = list(set(segregated_services[comm_type]))
+
+    return segregated_services
+
+
+def filter_empty_slots(calls_data):
+    """
+    Filters out empty time slots and services with no valid calls.
+
+    Parameters:
+        calls_data (dict): The original calls.json data.
+
+    Returns:
+        dict: Filtered data with no empty time slots.
+    """
+    # Remove empty time slots for each service
+    filtered_data = {
+        service: {
+            timestamp: calls for timestamp, calls in timestamps.items() if calls
+        }
+        for service, timestamps in calls_data.items()
+    }
+
+    # Remove services with no valid timestamps
+    filtered_data = {service: ts for service, ts in filtered_data.items() if ts}
+
+    return filtered_data
+
+
+def generate_new_calls(calls_file, probabilities_file, output_file="new_calls.json"):
+    """
+    Generate new_calls.json based on probabilities.json and segregated services.
+    
+    Parameters:
+        calls_file (str): Path to the calls.json file.
+        probabilities_file (str): Path to the probabilities.json file.
+        output_file (str): Path to save the generated new_calls.json file.
+    """
+    # Generate segregated services dynamically
+    segregated_services = segregate_receiving_services(calls_file, probabilities_file)
+
+    # Load input JSON files
+    with open(calls_file, 'r') as calls_f, open(probabilities_file, 'r') as probs_f:
+        calls_data = json.load(calls_f)
+        probabilities_data = json.load(probs_f)
+
+    # Initialize the new_calls structure
+    new_calls = {}
+
+    # Iterate over each service in calls.json
+    for sender_service, timestamps in calls_data.items():
+        new_calls[sender_service] = {}
+        for timestamp in timestamps:
+            new_calls[sender_service][timestamp] = []
+
+            # Check if the service has defined probabilities
+            if sender_service in probabilities_data:
+                for comm_type, probability in probabilities_data[sender_service].items():
+                    # Simulate whether the sender makes a call of this communication type
+                    if random.random() < probability:
+                        # Select a random service from the segregated services of this type
+                        if comm_type in segregated_services and segregated_services[comm_type]:
+                            receiver_service = random.choice(segregated_services[comm_type])
+                            # Add the generated call to the new_calls
+                            new_calls[sender_service][timestamp].append({
+                                "dm_service": receiver_service,
+                                "communication_type": comm_type
+                            })
+    
+    # Filter out empty slots
+    new_calls = filter_empty_slots(new_calls)  # Update new_calls with the filtered result
+
+    # Save the generated new_calls to a file
+    with open(output_file, 'w') as output_f:
+        json.dump(new_calls, output_f, indent=4)
+    print(f"New calls file saved to {output_file}")
+
+
 def main():
     NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
     KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "32092"))
@@ -1013,10 +1115,30 @@ def main():
 
     get_or_create_namespace(NAMESPACE)
 
+        # Menu for selecting normal or probabilistic model
+    print("Select the model to use:")
+    print("1. Normal model (using calls.json)")
+    print("2. Probabilistic model (generate new_calls.json)")
+    choice = input("Enter your choice (1/2): ").strip()
+
+    calls_file = "calls.json"
+    if choice == "2":
+        # Generate new_calls.json based on probabilities.json
+        probabilities_file = "probabilities.json"
+        print("Generating new_calls.json using the probabilistic model...")
+        #segregated_services = segregate_receiving_services(calls_file, probabilities_file)
+        generate_new_calls(calls_file, probabilities_file)
+        calls_file = "new_calls.json"  # Switch to using new_calls.json
+        print("Generated new_calls.json successfully.")
+    elif choice != "1":
+        print("Invalid choice. Exiting.")
+        return
+
+
     # Deploy Kafka and get kafka_replicas
     (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
-    renamed_containers, calls = get_and_rename_containers()
+    renamed_containers, calls = get_and_rename_containers(containersFile="containers.json", callsFile=calls_file)
 
     # Deploy Redis and get redis_ip
     deploy_redis_environment(NAMESPACE, v1, apps_v1)
