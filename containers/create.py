@@ -1027,7 +1027,6 @@ def segregate_receiving_services(calls_file, probabilities_file):
 
     return segregated_services
 
-
 def filter_empty_slots(calls_data):
     """
     Filters out empty time slots and services with no valid calls.
@@ -1121,7 +1120,7 @@ def main():
     print("2. Probabilistic model (generate new_calls.json)")
     choice = input("Enter your choice (1/2): ").strip()
 
-    calls_file = "calls.json"
+    calls_file = "calls_mapped.json"
     if choice == "2":
         # Generate new_calls.json based on probabilities.json
         probabilities_file = "probabilities.json"

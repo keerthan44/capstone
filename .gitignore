@@ -3,6 +3,7 @@ dummy
 /containers/containers*.json
 /containers/containers*.txt
 /containers/probabilities*.json
+/containers/new_calls*.json
 
 **/.env
 *env*
