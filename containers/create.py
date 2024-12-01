@@ -1000,32 +1000,37 @@ def split_calls_to_replicas(data, replicas, mappedName, choice):
     return result
 
 
-def segregate_receiving_services(calls_file, probabilities_file):
-    # Load JSON files
-    with open(calls_file, 'r') as calls_f, open(probabilities_file, 'r') as probs_f:
-        calls_data = json.load(calls_f)
-        probabilities_data = json.load(probs_f)
-    
-    # Create a dictionary to segregate services by received communication type
-    segregated_services = {comm_type: [] for comm_type in ["http", "mc", "rpc", "db", "mq"]}
+def segregate_receiving_services(calls_file):
+    # Load the JSON data from the file
+    with open(calls_file, 'r') as file:
+        data = json.load(file)
 
-    # Iterate over the services in calls.json to identify receiving services
-    for sender_service, timestamps in calls_data.items():
-        for timestamp, calls in timestamps.items():
-            for call in calls:
-                receiver_service = call["dm_service"]
-                communication_type = call["communication_type"]
+    # Initialize the result dictionary
+    result = {
+        "http": [],
+        "mc": [],
+        "rpc": [],
+        "db": [],
+        "mq": []
+    }
 
-                # Check if the receiver has the allowed communication type in probabilities.json
-                allowed_types = probabilities_data.get(receiver_service, {})
-                if communication_type in allowed_types:
-                    segregated_services[communication_type].append(receiver_service)
+    # Process the data
+    for source_service, interactions in data.items():  # Use `.items()` for dictionary iteration
+        for _, interaction_list in interactions.items():
+            for interaction in interaction_list:
+                receiving_service = interaction["dm_service"]
+                communication_type = interaction["communication_type"]
 
-    # Remove duplicates in each communication type's list
-    for comm_type in segregated_services:
-        segregated_services[comm_type] = list(set(segregated_services[comm_type]))
+                # Add the receiving service to the corresponding communication type
+                if receiving_service not in result[communication_type]:
+                    result[communication_type].append(receiving_service)
 
-    return segregated_services
+    # Display the results
+    # for rpc_type, services in result.items():
+    #     print(f"{rpc_type}: {services}")
+
+    return result
+
 
 def filter_empty_slots(calls_data):
     """
@@ -1061,7 +1066,7 @@ def generate_new_calls(calls_file, probabilities_file, output_file="new_calls.js
         output_file (str): Path to save the generated new_calls.json file.
     """
     # Generate segregated services dynamically
-    segregated_services = segregate_receiving_services(calls_file, probabilities_file)
+    segregated_services = segregate_receiving_services(calls_file)
 
     # Load input JSON files
     with open(calls_file, 'r') as calls_f, open(probabilities_file, 'r') as probs_f:
