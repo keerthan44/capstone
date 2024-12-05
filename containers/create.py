@@ -368,7 +368,7 @@ def insert_random_data_into_db(service_name, namespace):
     max_retries = 5
     connection = None
 
-    while retries < max_retries:
+    while True:
         try:
             connection = psycopg2.connect(
                 user="user",
@@ -648,13 +648,6 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
     Creates a PostgreSQL StatefulSet with primary-replica replication support using the Bitnami PostgreSQL image.
     It first creates the primary StatefulSet, then creates the replica StatefulSet.
     """
-    lifecycle=V1Lifecycle(
-        pre_stop=V1LifecycleHandler(
-            _exec=V1ExecAction(
-                command=["/bin/bash", "-c", "chown -R 65534:0 /bitnami/postgresql/data || true; chmod -R 777 /bitnami/postgresql/data"]
-            )
-        )
-    )
 
     # Define the lifecycle with a postStop handler correctly
     primary_container = V1Container(
@@ -674,19 +667,9 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
         ],
         ports=[client.V1ContainerPort(container_port=5432)],  # PostgreSQL port
         volume_mounts=[
-            V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")  # Volume mount for PostgreSQL data
+            V1VolumeMount(mount_path="/bitnami", name="data-volume")  # Volume mount for PostgreSQL data
         ],
         image_pull_policy="IfNotPresent",
-        lifecycle=lifecycle
-    )
-
-    init_container = V1Container(
-        name="init-chown-data",
-        image="bitnami/minideb",
-        command=["/bin/bash", "-c", "chown -R 1001:1001 /bitnami/postgresql/data || true;"],
-        volume_mounts=[
-            V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")
-        ],
         security_context=V1SecurityContext(
             run_as_user=0,  # Running as root to change permissions
             run_as_group=0,
@@ -700,7 +683,6 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
     )
 
     primary_pod_spec = V1PodSpec(
-        init_containers=[init_container],
         containers=[primary_container], 
         volumes=[primary_volume],
     )
@@ -749,10 +731,14 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
         ],
         ports=[client.V1ContainerPort(container_port=5432)],  # PostgreSQL port
         volume_mounts=[
-            V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")  # Volume mount for PostgreSQL data
+            V1VolumeMount(mount_path="/bitnami", name="data-volume")  # Volume mount for PostgreSQL data
         ],
         image_pull_policy="IfNotPresent",
-        lifecycle=lifecycle
+        security_context=V1SecurityContext(
+            run_as_user=0,  # Running as root to change permissions
+            run_as_group=0,
+            privileged=True
+        )
     )
 
     replica_volume = V1Volume(
@@ -760,22 +746,7 @@ def create_postgres_statefulset(apps_v1, namespace, container_name, pvc_name, re
         persistent_volume_claim=V1PersistentVolumeClaimVolumeSource(claim_name=pvc_name)
     )
 
-    replica_init_container = V1Container(
-        name="init-chown-data",
-        image="bitnami/minideb",
-        command=["/bin/bash", "-c", "chown -R 1001:1001 /bitnami/postgresql/data && chmod -R 777 /bitnami/postgresql/data"],
-        volume_mounts=[
-            V1VolumeMount(mount_path="/bitnami/postgresql/data", name="data-volume")
-        ],
-        security_context=V1SecurityContext(
-            run_as_user=65534,
-            run_as_group=65534,
-            privileged=True
-        )
-    )
-
     replica_pod_spec = V1PodSpec(
-        init_containers=[init_container],
         containers=[replica_container], 
         volumes=[replica_volume]
     )
@@ -1210,6 +1181,7 @@ def main():
     delete_all_configmaps(v1, NAMESPACE)
     delete_completed_jobs(batch_v1, v1, NAMESPACE)
     wait_for_pods_ready(NAMESPACE)
+
     for service_name, container_keys in memcached_values.items():
         db_mappedName = container_keys['mappedName']
         create_redis_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
