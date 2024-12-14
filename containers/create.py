@@ -1164,10 +1164,12 @@ def select_and_generate_calls_model():
     print("2. Probabilistic model (generate new_calls.json)")
     choice = input("Enter your choice (1/2): ").strip()
 
-    get_and_rename_containers(containersFile="containers.json", callsFile="calls.json")
-    calls_file = "calls_mapped.json"
+    # get_and_rename_containers(containersFile="containers.json", callsFile="calls.json")
+    calls_file = "calls.json"
     if choice == "2":
         # Generate new_calls.json based on probabilities.json
+
+        calculate_probabilities(calls_file)
         probabilities_file = "probabilities.json"
         intermediate_file = "intermediate_probabilities.json"
 
@@ -1192,6 +1194,51 @@ def select_and_generate_calls_model():
     
     return calls_file
 
+def calculate_probabilities(file_path, output_path="probabilities.json"):
+    """
+    Calculate probabilities of communication types for services based on input JSON file.
+
+    Parameters:
+    file_path (str): Path to the input JSON file.
+    output_path (str): Path to save the output JSON file containing probabilities.
+
+    Returns:
+    dict: A dictionary with calculated probabilities for each service.
+    """
+    try:
+        # Read and parse the input file
+        with open(file_path, 'r') as file:
+            data = json.load(file)
+        
+        probability_results = {}
+
+        # Process each service
+        for service, timestamps in data.items():
+            communication_counter = defaultdict(int)
+
+            # Count communication types
+            for interactions in timestamps.values():
+                for interaction in interactions:
+                    communication_type = interaction['communication_type']
+                    communication_counter[communication_type] += 1
+
+            # Calculate probabilities
+            total_calls = sum(communication_counter.values())
+            probabilities = {comm_type: round(count / total_calls, 3) for comm_type, count in communication_counter.items()}
+            probability_results[service] = probabilities
+
+        # Save probabilities to the output file
+        with open(output_path, 'w') as f:
+            json.dump(probability_results, f, indent=4)
+
+        return probability_results
+
+    except FileNotFoundError:
+        raise FileNotFoundError(f"File not found: {file_path}")
+    except json.JSONDecodeError:
+        raise ValueError("Invalid JSON file format.")
+    except Exception as e:
+        raise RuntimeError(f"An error occurred: {e}")
 
 def main():
     NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
