@@ -12,6 +12,10 @@ from redis_setup import deploy_redis_environment, set_start_time_redis
 import psycopg2
 import random
 import time
+import logging
+
+
+round_robin_counters = {}
 
 
 load_dotenv()  # take environment variables from .env.
@@ -1003,77 +1007,149 @@ def segregate_receiving_services(calls_file):
     return result
 
 
-def filter_empty_slots(calls_data):
+
+
+def generate_new_calls_with_probability_and_round_robin(calls_file, intermediate_file, output_file="new_calls.json"):
     """
-    Filters out empty time slots and services with no valid calls.
-
-    Parameters:
-        calls_data (dict): The original calls.json data.
-
-    Returns:
-        dict: Filtered data with no empty time slots.
+    Generate new_calls.json ensuring the number of calls in the new file matches the old file,
+    using probability to select communication type and round-robin for downstream service selection.
     """
-    # Remove empty time slots for each service
-    filtered_data = {
-        service: {
-            timestamp: calls for timestamp, calls in timestamps.items() if calls
-        }
-        for service, timestamps in calls_data.items()
-    }
-
-    # Remove services with no valid timestamps
-    filtered_data = {service: ts for service, ts in filtered_data.items() if ts}
-
-    return filtered_data
-
-
-def generate_new_calls(calls_file, probabilities_file, output_file="new_calls.json"):
-    """
-    Generate new_calls.json based on probabilities.json and segregated services.
-    
-    Parameters:
-        calls_file (str): Path to the calls.json file.
-        probabilities_file (str): Path to the probabilities.json file.
-        output_file (str): Path to save the generated new_calls.json file.
-    """
-    # Generate segregated services dynamically
-    segregated_services = segregate_receiving_services(calls_file)
-
     # Load input JSON files
-    with open(calls_file, 'r') as calls_f, open(probabilities_file, 'r') as probs_f:
+    with open(calls_file, 'r') as calls_f, open(intermediate_file, 'r') as intermediate_f:
         calls_data = json.load(calls_f)
-        probabilities_data = json.load(probs_f)
+        intermediate_data = json.load(intermediate_f)
 
     # Initialize the new_calls structure
     new_calls = {}
 
-    # Iterate over each service in calls.json
     for sender_service, timestamps in calls_data.items():
         new_calls[sender_service] = {}
-        for timestamp in timestamps:
+        for timestamp, old_calls in timestamps.items():
             new_calls[sender_service][timestamp] = []
 
-            # Check if the service has defined probabilities
-            if sender_service in probabilities_data:
-                for comm_type, probability in probabilities_data[sender_service].items():
-                    # Simulate whether the sender makes a call of this communication type
-                    if random.random() < probability:
-                        # Select a random service from the segregated services of this type
-                        if comm_type in segregated_services and segregated_services[comm_type]:
-                            receiver_service = random.choice(segregated_services[comm_type])
-                            # Add the generated call to the new_calls
-                            new_calls[sender_service][timestamp].append({
-                                "dm_service": receiver_service,
-                                "communication_type": comm_type
-                            })
-    
-    # Filter out empty slots
-    new_calls = filter_empty_slots(new_calls)  # Update new_calls with the filtered result
+            # Match the number of calls
+            if sender_service in intermediate_data:
+                # Prepare cumulative probabilities for communication types
+                comm_type_probs = {
+                    comm_type: comm_data["probability"]
+                    for comm_type, comm_data in intermediate_data[sender_service].items()
+                }
+                cumulative_probabilities = calculate_cumulative_probabilities(comm_type_probs)
+
+                for old_call in old_calls:
+                    # Select communication type based on probability
+                    random_value = random.random()
+                    comm_type = select_communication_type(cumulative_probabilities, random_value)
+
+                    # Get downstream services for the selected communication type
+                    comm_data = intermediate_data[sender_service].get(comm_type, {})
+                    downstream_services = comm_data.get("downstream_services", [])
+
+                    # Skip if no downstream services are available
+                    if not downstream_services:
+                        continue
+
+                    # Extract just the list of services
+                    downstream_service_names = [service["service"] for service in downstream_services]
+
+                    # Select the service using round-robin logic
+                    selected_service = select_service_round_robin(
+                        round_robin_counters,
+                        sender_service,
+                        comm_type,
+                        downstream_service_names
+                    )
+
+                    # Add the call
+                    new_calls[sender_service][timestamp].append({
+                        "dm_service": selected_service,
+                        "communication_type": comm_type
+                    })
 
     # Save the generated new_calls to a file
     with open(output_file, 'w') as output_f:
         json.dump(new_calls, output_f, indent=4)
     print(f"New calls file saved to {output_file}")
+    print("New calls file content:", json.dumps(new_calls, indent=4))
+
+def generate_intermediate_probabilities(calls_data, probabilities_data, segregated_services, intermediate_file="intermediate_probabilities.json"):
+    """
+    Generate an intermediate JSON file combining probabilities, segregated services, and actual call data.
+    """
+    logging.info("Generating intermediate probabilities structure with actual call data.")
+
+    # Build the intermediate structure
+    intermediate_data = {}
+    for sender_service, comm_types in probabilities_data.items():
+        intermediate_data[sender_service] = {}
+        for comm_type, prob_data in comm_types.items():
+            downstream_services = segregated_services.get(comm_type, [])
+            intermediate_data[sender_service][comm_type] = {
+                "probability": prob_data,
+                "downstream_services": [
+                    {"service": dm, "probability": 1.0 / len(downstream_services)}
+                    for dm in downstream_services
+                ]
+            }
+
+    # Save the intermediate data
+    with open(intermediate_file, 'w') as intermediate_f:
+        json.dump(intermediate_data, intermediate_f, indent=4)
+    logging.info(f"Intermediate probabilities file saved to {intermediate_file}")
+    print("Intermediate probabilities file content:", json.dumps(intermediate_data, indent=4))
+
+    return intermediate_data
+
+def select_communication_type(cumulative_probabilities, random_value):
+    """
+    Select a communication type based on a random value and cumulative probabilities.
+    """
+    for comm_type, cumulative_probability in cumulative_probabilities:
+        if random_value <= cumulative_probability:
+            print(f"Selected communication type: {comm_type} for random value: {random_value}")
+            return comm_type
+    return None
+
+def calculate_cumulative_probabilities(communication_types):
+    """
+    Calculate cumulative probabilities for communication types.
+    """
+    cumulative_probabilities = []
+    cumulative = 0.0
+    for comm_type, prob in communication_types.items():
+        cumulative += prob
+        cumulative_probabilities.append((comm_type, cumulative))
+    print("Cumulative probabilities:", cumulative_probabilities)
+    return cumulative_probabilities
+
+def select_service_round_robin(counters, sender_service, comm_type, downstream_services):
+    """
+    Select the next downstream service in a round-robin fashion.
+    
+    Parameters:
+        counters (dict): Dictionary to track round-robin counters.
+        sender_service (str): The service initiating the call.
+        comm_type (str): The communication type (e.g., http, rpc).
+        downstream_services (list): List of downstream services.
+
+    Returns:
+        str: The selected downstream service.
+    """
+    # Initialize counter for the sender_service and communication type if not present
+    if sender_service not in counters:
+        counters[sender_service] = {}
+    if comm_type not in counters[sender_service]:
+        counters[sender_service][comm_type] = 0
+
+    # Get the current counter and select the service
+    counter = counters[sender_service][comm_type]
+    selected_service = downstream_services[counter % len(downstream_services)]
+
+    # Update the counter for the next selection
+    counters[sender_service][comm_type] = (counter + 1) % len(downstream_services)
+
+    print(f"Round-robin selection: Sender={sender_service}, CommType={comm_type}, SelectedService={selected_service}")
+    return selected_service
 
 def select_and_generate_calls_model():
     """
@@ -1088,12 +1164,26 @@ def select_and_generate_calls_model():
     print("2. Probabilistic model (generate new_calls.json)")
     choice = input("Enter your choice (1/2): ").strip()
 
+    get_and_rename_containers(containersFile="containers.json", callsFile="calls.json")
     calls_file = "calls_mapped.json"
     if choice == "2":
         # Generate new_calls.json based on probabilities.json
         probabilities_file = "probabilities.json"
+        intermediate_file = "intermediate_probabilities.json"
+
+        segregated_services = segregate_receiving_services(calls_file)
+
+
         print("Generating new_calls.json using the probabilistic model...")
-        generate_new_calls(calls_file, probabilities_file)
+
+        with open(calls_file, 'r') as calls_f, open(probabilities_file, 'r') as probs_f:
+            calls_data = json.load(calls_f)
+            probabilities_data = json.load(probs_f)
+        
+        generate_intermediate_probabilities(calls_data, probabilities_data, segregated_services, intermediate_file)
+        generate_new_calls_with_probability_and_round_robin(calls_file, intermediate_file)
+
+
         calls_file = "new_calls.json"  # Switch to using new_calls.json
         print("Generated new_calls.json successfully.")
     elif choice != "1":
@@ -1163,44 +1253,44 @@ def main():
         create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
 
     # Handle DB containers differently
-    # for service_name, container_keys in memcached_values.items():
-    #     memcached_mappedName = container_keys['mappedName']
-    #     replicas = container_keys.get('replicas', 1)
+    for service_name, container_keys in memcached_values.items():
+        memcached_mappedName = container_keys['mappedName']
+        replicas = container_keys.get('replicas', 1)
 
-    #     # Step 1: Create headless service for PostgreSQL container (for replication)
-    #     create_memcached_service(v1, NAMESPACE, memcached_mappedName)
-    #     create_container_service(v1, NAMESPACE, memcached_mappedName, [{ "port": 6379, "target_port": 6379, 'name': 'redis-port' }])
+        # Step 1: Create headless service for PostgreSQL container (for replication)
+        create_memcached_service(v1, NAMESPACE, memcached_mappedName)
+        create_container_service(v1, NAMESPACE, memcached_mappedName, [{ "port": 6379, "target_port": 6379, 'name': 'redis-port' }])
 
-    #     # # Step 2: Create PostgreSQL StatefulSet with replication support
-    #     pvc_name = f"{memcached_mappedName}-pvc"
-    #     create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
-    #     create_redis_statefulset(apps_v1, NAMESPACE, memcached_mappedName, pvc_name, replicas=replicas)
+        # # Step 2: Create PostgreSQL StatefulSet with replication support
+        pvc_name = f"{memcached_mappedName}-pvc"
+        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
+        create_redis_statefulset(apps_v1, NAMESPACE, memcached_mappedName, pvc_name, replicas=replicas)
 
     # # Handle DB containers differently
-    # for service_name, container_keys in db_values.items():
-    #     db_mappedName = container_keys['mappedName']
-    #     replicas = container_keys.get('replicas', 1)
+    for service_name, container_keys in db_values.items():
+        db_mappedName = container_keys['mappedName']
+        replicas = container_keys.get('replicas', 1)
 
-    #     # Step 1: Create headless service for PostgreSQL container (for replication)
-    #     create_db_headless_service(v1, NAMESPACE, db_mappedName)
-    #     create_container_service(v1, NAMESPACE, db_mappedName, [{ "port": 5432, "target_port": 5432, 'name': 'postgresql' }])
+        # Step 1: Create headless service for PostgreSQL container (for replication)
+        create_db_headless_service(v1, NAMESPACE, db_mappedName)
+        create_container_service(v1, NAMESPACE, db_mappedName, [{ "port": 5432, "target_port": 5432, 'name': 'postgresql' }])
 
-    #     # Step 2: Create PostgreSQL StatefulSet with replication support
-    #     pvc_name = f"{db_mappedName}-pvc"
-    #     create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
-    #     create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
-    # wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
-    # delete_all_configmaps(v1, NAMESPACE)
-    # delete_completed_jobs(batch_v1, v1, NAMESPACE)
-    # wait_for_pods_ready(NAMESPACE)
+        # Step 2: Create PostgreSQL StatefulSet with replication support
+        pvc_name = f"{db_mappedName}-pvc"
+        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
+        create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
+    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
+    delete_all_configmaps(v1, NAMESPACE)
+    delete_completed_jobs(batch_v1, v1, NAMESPACE)
+    wait_for_pods_ready(NAMESPACE)
 
-    # for service_name, container_keys in memcached_values.items():
-    #     db_mappedName = container_keys['mappedName']
-    #     create_redis_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
+    for service_name, container_keys in memcached_values.items():
+        db_mappedName = container_keys['mappedName']
+        create_redis_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
 
-    # for service_name, container_keys in db_values.items():
-    #     db_mappedName = container_keys['mappedName']
-    #     create_postgres_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
+    for service_name, container_keys in db_values.items():
+        db_mappedName = container_keys['mappedName']
+        create_postgres_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
     wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
     delete_all_configmaps(v1, NAMESPACE)
     delete_completed_jobs(batch_v1, v1, NAMESPACE)
