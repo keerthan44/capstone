@@ -13,7 +13,7 @@ import psycopg2
 import random
 import time
 import logging
-
+import numpy as np
 
 round_robin_counters = {}
 
@@ -974,6 +974,7 @@ def split_calls_to_replicas(data, replicas, mappedName, choice):
     
     return result
 
+# Probabilities generation part:
 
 def segregate_receiving_services(calls_file):
     # Load the JSON data from the file
@@ -1151,10 +1152,114 @@ def select_service_round_robin(counters, sender_service, comm_type, downstream_s
     print(f"Round-robin selection: Sender={sender_service}, CommType={comm_type}, SelectedService={selected_service}")
     return selected_service
 
-def select_and_generate_calls_model():
+def generate_timestamps_with_exponential(original_data, lambda_=5.0, output_file="generated_timestamps.json"):
     """
-    Allows the user to select between the normal and probabilistic models,
-    and generates the appropriate calls file.
+    Generate timestamps for each upstream microservice, ensuring proper scaling and distribution.
+
+    Args:
+        original_data (dict): Original JSON-like dictionary with upstream microservices.
+        lambda_ (float): Rate parameter for the exponential distribution.
+        output_file (str): Name of the output JSON file.
+    
+    Returns:
+        None: Writes the output to a JSON file.
+    """
+    new_data = {}
+
+    for um_service, timestamps in original_data.items():
+        new_data[um_service] = {}
+
+        # Calculate total number of downstream calls and original timestamp range
+        total_downstreams = sum(len(timestamps[str(ts)]) for ts in timestamps)
+        original_timestamps = list(map(int, timestamps.keys()))
+        min_original = min(original_timestamps)
+        max_original = max(original_timestamps) if len(original_timestamps) > 1 else min_original + 1
+
+        # Generate inter-arrival times and cumulative timestamps
+        inter_arrival_times = np.random.exponential(scale=1/lambda_, size=total_downstreams)
+        generated_timestamps = np.cumsum(inter_arrival_times).astype(int)
+
+        # Scale the generated timestamps to match the original range
+        scaled_timestamps = np.interp(
+            generated_timestamps,
+            (generated_timestamps.min(), generated_timestamps.max()),
+            (min_original, max_original)
+        ).astype(int)
+
+        # Distribute downstream entries across scaled timestamps
+        for ts in scaled_timestamps:
+            ts_str = str(ts)
+            if ts_str not in new_data[um_service]:
+                new_data[um_service][ts_str] = []
+            # Add a downstream entry to this timestamp
+            new_data[um_service][ts_str].append({"dm_service": "", "communication_type": ""})
+
+    # Write the result to a JSON file
+    with open(output_file, "w") as f:
+        json.dump(new_data, f, indent=4)
+
+
+
+def generate_timestamps_with_zipfian(original_data, zipf_s=1.5, output_file="generated_timestamps.json"):
+    """
+    Generate timestamps for each upstream microservice using a Zipfian distribution.
+
+    Args:
+        original_data (dict): Original JSON-like dictionary with upstream microservices.
+        zipf_s (float): The parameter of the Zipfian distribution (skewness).
+        output_file (str): Name of the output JSON file.
+    
+    Returns:
+        None: Writes the output to a JSON file.
+    """
+    new_data = {}
+
+    for um_service, timestamps in original_data.items():
+        new_data[um_service] = {}
+
+        # Calculate total number of downstream calls and original timestamp range
+        total_downstreams = sum(len(timestamps[str(ts)]) for ts in timestamps)
+        original_timestamps = list(map(int, timestamps.keys()))
+        min_original = min(original_timestamps)
+        max_original = max(original_timestamps) if len(original_timestamps) > 1 else min_original + 1
+        timestamp_range = max_original - min_original
+
+        # Generate timestamps using Zipfian distribution
+        zipf_samples = np.random.zipf(zipf_s, total_downstreams)
+        if zipf_samples.max() == zipf_samples.min():
+            # If all values are identical, distribute timestamps evenly
+            normalized_samples = np.linspace(0, 1, total_downstreams)
+        else:
+            # Normalize samples to [0, 1]
+            normalized_samples = (zipf_samples - zipf_samples.min()) / (zipf_samples.max() - zipf_samples.min())
+        
+        # Scale timestamps to match original range
+        scaled_timestamps = (normalized_samples * timestamp_range + min_original).astype(int)
+
+        # Distribute downstream entries across scaled timestamps
+        for ts in scaled_timestamps:
+            ts_str = str(ts)
+            if ts_str not in new_data[um_service]:
+                new_data[um_service][ts_str] = []
+            # Add a downstream entry to this timestamp
+            new_data[um_service][ts_str].append({"dm_service": "", "communication_type": ""})
+
+    # Write the result to a JSON file
+    with open(output_file, "w") as f:
+        json.dump(new_data, f, indent=4)
+
+# Generate timestamps and save to a JSON file
+
+
+def select_and_generate_calls_model():
+    
+    """
+    Allows the user to select between different models and generates the appropriate calls file.
+    Options:
+    1. Normal model (calls.json)
+    2. Probabilistic model (new_calls.json)
+    3. Zipfian distribution model
+    4. Exponential distribution model
     
     Returns:
         str: The name of the calls file to use.
@@ -1162,37 +1267,85 @@ def select_and_generate_calls_model():
     print("Select the model to use:")
     print("1. Normal model (using calls.json)")
     print("2. Probabilistic model (generate new_calls.json)")
-    choice = input("Enter your choice (1/2): ").strip()
+    print("3. Zipfian distribution model")
+    print("4. Exponential distribution model")
+    choice = input("Enter your choice (1/2/3/4): ").strip()
 
-    # get_and_rename_containers(containersFile="containers.json", callsFile="calls.json")
     calls_file = "calls.json"
+
     if choice == "2":
         # Generate new_calls.json based on probabilities.json
-
+        print("Generating new_calls.json using the probabilistic model...")
         calculate_probabilities(calls_file)
         probabilities_file = "probabilities.json"
         intermediate_file = "intermediate_probabilities.json"
 
         segregated_services = segregate_receiving_services(calls_file)
 
+        with open(calls_file, 'r') as calls_f, open(probabilities_file, 'r') as probs_f:
+            calls_data = json.load(calls_f)
+            probabilities_data = json.load(probs_f)
 
-        print("Generating new_calls.json using the probabilistic model...")
+        generate_intermediate_probabilities(calls_file, probabilities_data, segregated_services, intermediate_file)
+        generate_new_calls_with_probability_and_round_robin(calls_file, intermediate_file)
+        calls_file = "new_calls.json"
+        print("Generated new_calls.json successfully.")
+
+    elif choice == "3":
+        # Generate timestamps using Zipfian distribution
+        print("Generating calls using Zipfian distribution...")
+
+        probabilities_file = "probabilities.json"
+        intermediate_file = "intermediate_probabilities.json"
+        calculate_probabilities(calls_file)
+        segregated_services = segregate_receiving_services(calls_file)
 
         with open(calls_file, 'r') as calls_f, open(probabilities_file, 'r') as probs_f:
             calls_data = json.load(calls_f)
             probabilities_data = json.load(probs_f)
-        
+
         generate_intermediate_probabilities(calls_data, probabilities_data, segregated_services, intermediate_file)
-        generate_new_calls_with_probability_and_round_robin(calls_file, intermediate_file)
+        generate_timestamps_with_zipfian(calls_data, zipf_s=1.5, output_file="generated_timestamps_zipfian.json")
 
+        calls_file = "generated_timestamps_zipfian.json"
+        with open(intermediate_file, 'r') as intermediate_f:
+            intermediate_data = json.load(intermediate_f)
 
-        calls_file = "new_calls.json"  # Switch to using new_calls.json
-        print("Generated new_calls.json successfully.")
+        process_zigfian_and_exponential(calls_file, intermediate_data)
+        calls_file = "new_calls.json"
+
+        print("Generated generated_timestamps_zipfian.json successfully.")
+
+    elif choice == "4":
+        # Generate timestamps using Exponential distribution
+        print("Generating calls using Exponential distribution...")
+        probabilities_file = "probabilities.json"
+        intermediate_file = "intermediate_probabilities.json"
+        calculate_probabilities(calls_file)
+        segregated_services = segregate_receiving_services(calls_file)
+
+        with open(calls_file, 'r') as calls_f, open(probabilities_file, 'r') as probs_f:
+            calls_data = json.load(calls_f)
+            probabilities_data = json.load(probs_f)
+
+        generate_intermediate_probabilities(calls_data, probabilities_data, segregated_services, intermediate_file)
+        generate_timestamps_with_exponential(calls_data, lambda_=5.0, output_file="generated_timestamps_exponential.json")
+        calls_file = "generated_timestamps_exponential.json"
+
+        with open(intermediate_file, 'r') as intermediate_f:
+            intermediate_data = json.load(intermediate_f)
+
+        process_zigfian_and_exponential(calls_file, intermediate_data)
+        calls_file = "new_calls.json"
+        print("Generated generated_timestamps_exponential.json successfully.")
+
     elif choice != "1":
         print("Invalid choice. Exiting.")
         return None
-    
+
     return calls_file
+
+
 
 def calculate_probabilities(file_path, output_path="probabilities.json"):
     """
@@ -1239,6 +1392,56 @@ def calculate_probabilities(file_path, output_path="probabilities.json"):
         raise ValueError("Invalid JSON file format.")
     except Exception as e:
         raise RuntimeError(f"An error occurred: {e}")
+
+def process_zigfian_and_exponential(input_file, intermediate_data,output_file="new_calls.json"):
+    with open(input_file, 'r') as file:
+        data = json.load(file)
+
+    new_calls = {}
+    for sender_service, timestamps in data.items():
+        new_calls[sender_service] = {}
+        for timestamp, interactions in timestamps.items():
+            new_calls[sender_service][timestamp] = []
+
+            if not isinstance(interactions, list):
+                continue
+
+            for _ in interactions:
+                # Select communication type based on probability
+                comm_type_probs = {
+                    comm_type: comm_data["probability"]
+                    for comm_type, comm_data in intermediate_data.get(sender_service, {}).items()
+                }
+                if not comm_type_probs:
+                    continue
+
+                cumulative_probabilities = calculate_cumulative_probabilities(comm_type_probs)
+                random_value = random.random()
+                comm_type = select_communication_type(cumulative_probabilities, random_value)
+
+                # Select downstream service using round-robin
+                comm_data = intermediate_data.get(sender_service, {}).get(comm_type, {})
+                downstream_services = comm_data.get("downstream_services", [])
+                if not downstream_services:
+                    continue
+
+                downstream_service_names = [service["service"] for service in downstream_services]
+                selected_service = select_service_round_robin(
+                    round_robin_counters, sender_service, comm_type, downstream_service_names
+                )
+
+                new_calls[sender_service][timestamp].append({
+                    "dm_service": selected_service,
+                    "communication_type": comm_type
+                })
+
+    with open(output_file, 'w') as output_f:
+        json.dump(new_calls, output_f, indent=4)
+    print(f"New calls file saved to {output_file}")
+    print("New calls file content:", json.dumps(new_calls, indent=4))
+
+
+
 
 def main():
     NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
