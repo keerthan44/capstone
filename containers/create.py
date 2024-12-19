@@ -1165,6 +1165,14 @@ def generate_timestamps_with_exponential(original_data, lambda_=5.0, output_file
         None: Writes the output to a JSON file.
     """
     new_data = {}
+    first_call_preserved = False  # Track if the first call has been handled
+
+    # Identify the first service and its first timestamp dynamically
+    first_service = list(original_data.keys())[0] if original_data else None
+    first_timestamp = None
+    if first_service:
+        first_timestamps = list(original_data[first_service].keys())
+        first_timestamp = first_timestamps[0] if first_timestamps else None
 
     for um_service, timestamps in original_data.items():
         new_data[um_service] = {}
@@ -1175,19 +1183,34 @@ def generate_timestamps_with_exponential(original_data, lambda_=5.0, output_file
         min_original = min(original_timestamps)
         max_original = max(original_timestamps) if len(original_timestamps) > 1 else min_original + 1
 
-        # Generate inter-arrival times and cumulative timestamps
-        inter_arrival_times = np.random.exponential(scale=1/lambda_, size=total_downstreams)
-        generated_timestamps = np.cumsum(inter_arrival_times).astype(int)
+        # Handle cases where total_downstreams is less than 2
+        if total_downstreams < 2:
+            final_timestamps = original_timestamps
+        else:
+            # Generate inter-arrival times and cumulative timestamps
+            inter_arrival_times = np.random.exponential(scale=1 / lambda_, size=total_downstreams - 2)
+            generated_timestamps = np.cumsum(inter_arrival_times).astype(int)
 
-        # Scale the generated timestamps to match the original range
-        scaled_timestamps = np.interp(
-            generated_timestamps,
-            (generated_timestamps.min(), generated_timestamps.max()),
-            (min_original, max_original)
-        ).astype(int)
+            # Scale the generated timestamps to match the original range, excluding first and last
+            scaled_timestamps = np.interp(
+                generated_timestamps,
+                (generated_timestamps.min(), generated_timestamps.max()),
+                (min_original + 1, max_original - 1)
+            ).astype(int)
 
-        # Distribute downstream entries across scaled timestamps
-        for ts in scaled_timestamps:
+            # Include the first and last timestamps explicitly
+            final_timestamps = np.concatenate(([min_original], scaled_timestamps, [max_original]))
+
+        # Ensure the first call is preserved dynamically
+        if not first_call_preserved and um_service == first_service and first_timestamp:
+            new_data[first_service][first_timestamp] = [{"dm_service": "", "communication_type": ""} for _ in original_data[first_service][first_timestamp] if _]
+            first_call_preserved = True
+
+        # Distribute downstream entries across timestamps
+        for ts in final_timestamps:
+            if um_service != first_service and ts == int(first_timestamp):
+                continue  # Ensure no other service uses the first timestamp
+
             ts_str = str(ts)
             if ts_str not in new_data[um_service]:
                 new_data[um_service][ts_str] = []
@@ -1197,7 +1220,6 @@ def generate_timestamps_with_exponential(original_data, lambda_=5.0, output_file
     # Write the result to a JSON file
     with open(output_file, "w") as f:
         json.dump(new_data, f, indent=4)
-
 
 
 def generate_timestamps_with_zipfian(original_data, zipf_s=1.5, output_file="generated_timestamps.json"):
@@ -1213,6 +1235,14 @@ def generate_timestamps_with_zipfian(original_data, zipf_s=1.5, output_file="gen
         None: Writes the output to a JSON file.
     """
     new_data = {}
+    first_call_preserved = False  # Track if the first call has been handled
+
+    # Identify the first service and its first timestamp dynamically
+    first_service = list(original_data.keys())[0] if original_data else None
+    first_timestamp = None
+    if first_service:
+        first_timestamps = list(original_data[first_service].keys())
+        first_timestamp = first_timestamps[0] if first_timestamps else None
 
     for um_service, timestamps in original_data.items():
         new_data[um_service] = {}
@@ -1224,27 +1254,41 @@ def generate_timestamps_with_zipfian(original_data, zipf_s=1.5, output_file="gen
         max_original = max(original_timestamps) if len(original_timestamps) > 1 else min_original + 1
         timestamp_range = max_original - min_original
 
-        # Generate timestamps using Zipfian distribution
-        zipf_samples = np.random.zipf(zipf_s, total_downstreams)
-        if zipf_samples.max() == zipf_samples.min():
-            # If all values are identical, distribute timestamps evenly
-            normalized_samples = np.linspace(0, 1, total_downstreams)
+        if total_downstreams < 2:
+            # If not enough downstreams to generate Zipfian samples, use the original timestamps
+            final_timestamps = original_timestamps
         else:
-            # Normalize samples to [0, 1]
-            normalized_samples = (zipf_samples - zipf_samples.min()) / (zipf_samples.max() - zipf_samples.min())
-        
-        # Scale timestamps to match original range
-        scaled_timestamps = (normalized_samples * timestamp_range + min_original).astype(int)
+            # Generate timestamps using Zipfian distribution
+            zipf_samples = np.random.zipf(zipf_s, total_downstreams - 2)
+            if zipf_samples.max() == zipf_samples.min():
+                # If all values are identical, distribute timestamps evenly
+                normalized_samples = np.linspace(0, 1, total_downstreams - 2)
+            else:
+                # Normalize samples to [0, 1]
+                normalized_samples = (zipf_samples - zipf_samples.min()) / (zipf_samples.max() - zipf_samples.min())
+            
+            # Scale timestamps to match original range, excluding first and last
+            scaled_timestamps = (normalized_samples * (timestamp_range - 2) + min_original + 1).astype(int)
 
-        # Distribute downstream entries across scaled timestamps
-        for ts in scaled_timestamps:
+            # Include the first and last timestamps explicitly
+            final_timestamps = np.concatenate(([min_original], scaled_timestamps, [max_original]))
+
+        # Ensure the first call is preserved dynamically
+        if not first_call_preserved and um_service == first_service and first_timestamp:
+            new_data[first_service][first_timestamp] = [{"dm_service": "", "communication_type": ""} for _ in original_data[first_service][first_timestamp] if _]
+            first_call_preserved = True
+
+        # Distribute downstream entries across timestamps
+        for ts in final_timestamps:
+            if um_service != first_service and ts == int(first_timestamp):
+                continue  # Ensure no other service uses the first timestamp
+
             ts_str = str(ts)
             if ts_str not in new_data[um_service]:
                 new_data[um_service][ts_str] = []
             # Add a downstream entry to this timestamp
             new_data[um_service][ts_str].append({"dm_service": "", "communication_type": ""})
 
-    # Write the result to a JSON file
     with open(output_file, "w") as f:
         json.dump(new_data, f, indent=4)
 
