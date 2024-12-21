@@ -12,6 +12,7 @@ from redis_setup import deploy_redis_environment, set_start_time_redis
 import psycopg2
 import random
 import time
+import requests
 
 
 load_dotenv()  # take environment variables from .env.
@@ -116,22 +117,20 @@ def extract_remove_memcached_db_containers(renamed_containers, calls):
 
     return db_values, memcached_values
 
-def addContainerJob(containers):
+def addContainerJob(containers, option, service_num):
     while True:
-        print("Menu: ")
-        print("1. All Containers are sleeping")
-        print("2. No Containers are sleeping")
-        print("3. Some Containers are sleeping")
-        option = input("Enter your choice (1/2/3): ").strip()
         match option:
             case '1': 
                 return {container: {**containers[container], "containerJob": 0} for container in containers}
-            case '2': 
+            case '3': 
                 return {container: {**containers[container], "containerJob": 1} for container in containers}
-            case '3':
+            case '2':
                 print("You can enter the containers that are working in ranges like 1-5, 7-10")
                 print("1-1(includes both 1 and 1), 1-4(includes 1, 2, 3, 4)")
-                containersWorking = input("Enter the containers that are working: ").replace(" ", "").split(",")
+                # containersWorking = input("Enter the containers that are working: ").replace(" ", "").split(",")
+                
+                #hardcoded to first half of containers have background tasks
+                containersWorking = [f"1-{service_num//2}"]
                 print(containersWorking)
                 for i in range(len(containersWorking)):
                     start, end = containersWorking[i].split("-")
@@ -1100,149 +1099,288 @@ def generate_new_calls(calls_file, probabilities_file, output_file="new_calls.js
         json.dump(new_calls, output_f, indent=4)
     print(f"New calls file saved to {output_file}")
 
+def stress_servers(server_stress_config):
+    """
+    Function to apply stress based on the server stress configuration.
+    """
+    match server_stress_config:
+        case 0:
+            print("No server stress applied.")
+        case 1:
+            print("Stressing master node.")
+            apply_stress(node_name="master", workers=0)
+        case 2:
+            print("Stressing master node and 1 worker.")
+            apply_stress(node_name="master", workers=1)
+        case 3:
+            print("Stressing master node and 2 workers.")
+            apply_stress(node_name="master", workers=2)
+        case 4:
+            print("Stressing 1 worker node only (not master).")
+            apply_stress(node_name=None, workers=1)
+        case 5:
+            print("Stressing 2 worker nodes.")
+            apply_stress(node_name=None, workers=2)
+        case 6:
+            print("Stressing all 3 worker nodes.")
+            apply_stress(node_name=None, workers=3)
+        case 7:
+            print("Stressing all nodes (master and 3 workers).")
+            apply_stress(node_name="master", workers=3)
 
-def main():
-    NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
-    KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "32092"))
-    NODE_IP = os.getenv("NODE_IP", "localhost")
-    STORAGE_CLASS = "nfs-client"
-    config.load_kube_config()
+def apply_stress(node_name=None, workers=0):
+    """
+    Deploys a Kubernetes job to stress the specified nodes.
+    """
+    master_ip = "10.10.3.27"
+    worker_ips = ["10.10.3.25", "10.10.3.26", "10.10.3.28"]
 
-    v1 = client.CoreV1Api()
-    apps_v1 = client.AppsV1Api()  # Correct API object for StatefulSets
-    rbac_v1 = client.RbacAuthorizationV1Api()
-    batch_v1 = client.BatchV1Api()
+    stressed_nodes = []
 
-    get_or_create_namespace(NAMESPACE)
+    if node_name == "master":
+        print(f"Stressing master node at {master_ip}.")
+        control_cpu_stressor(master_ip, "start")
+        stressed_nodes.append(master_ip)
 
-        # Menu for selecting normal or probabilistic model
-    print("Select the model to use:")
-    print("1. Normal model (using calls.json)")
-    print("2. Probabilistic model (generate new_calls.json)")
-    choice = input("Enter your choice (1/2): ").strip()
+    if workers > 0:
+        selected_workers = random.sample(worker_ips, workers)
+        for worker_ip in selected_workers:
+            print(f"Stressing worker node at {worker_ip}.")
+            control_cpu_stressor(worker_ip, "start")
+            stressed_nodes.append(worker_ip)
 
-    calls_file = "calls.json"
-    if choice == "2":
-        # Generate new_calls.json based on probabilities.json
-        probabilities_file = "probabilities.json"
-        print("Generating new_calls.json using the probabilistic model...")
-        #segregated_services = segregate_receiving_services(calls_file, probabilities_file)
-        generate_new_calls(calls_file, probabilities_file)
-        calls_file = "new_calls.json"  # Switch to using new_calls.json
-        print("Generated new_calls.json successfully.")
-    elif choice != "1":
-        print("Invalid choice. Exiting.")
+    print(f"Stressed nodes: {stressed_nodes}")
+
+def control_cpu_stressor(ip_address: str, command: str):
+    """
+    Control the CPU stressor on a remote server.
+
+    Args:
+        ip_address (str): The IP address of the server.
+        command (str): Either "start" or "stop".
+
+    Returns:
+        None
+    """
+    url = f"http://{ip_address}:5000/{command}"
+
+    if command not in ["start", "stop"]:
+        print(f"Invalid command for {ip_address}. Use 'start' or 'stop'.")
         return
 
+    try:
+        response = requests.post(url)
 
-    # Deploy Kafka and get kafka_replicas
-    (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
+        if response.status_code == 200:
+            print(f"Command '{command}' executed successfully on {ip_address}: {response.json()}")
+        else:
+            print(f"Failed to execute '{command}' on {ip_address}. HTTP {response.status_code}, Details: {response.text}")
 
-    renamed_containers, calls = get_and_rename_containers(containersFile="containers.json", callsFile=calls_file)
+    except requests.exceptions.RequestException as e:
+        print(f"Request to {ip_address} failed: {str(e)}")
+        
+def copy_logs_to_local(logs_file: str):
+    """
+    Copies the logs file from a Kubernetes pod to a local directory.
 
-    # Deploy Redis and get redis_ip
-    deploy_redis_environment(NAMESPACE, v1, apps_v1)
-    redis_service_name = 'redis-service'
-    wait_for_pods_ready(NAMESPACE)
-
-    # Call logging service setup (after Redis is ready)
-    print(redis_service_name)
-    create_logging_statefulset(apps_v1, NAMESPACE, redis_service_name, STORAGE_CLASS)
-    create_logging_service(v1, NAMESPACE)
-
-    # Get containers and calls data
-    db_values, memcached_values = extract_remove_memcached_db_containers(renamed_containers, calls)
+    Args:
+        logs_file (str): The name to assign the downloaded logs file.
+    """
+    # Define the source and target paths
+    source_path = "logging-statefulset-0:/app/request_logs.csv"
+    target_path = f"~/Downloads/{logs_file}"
+    namespace = "static-application"
     
-    # Random or round robin choice
-    choice = input("Do you want random assignment of calls between instance IDs or round robin assignment?\n (Enter 0 for 'random' or 1 for 'round_robin'): ").strip().lower()
-
-    # Define topics for Kafka (includes DB containers)
-    topics = []
-
-    # Handle other containers
-    for container in renamed_containers:
-        containerKeys = renamed_containers[container]
-        mappedName = containerKeys['mappedName']
-        replicas = containerKeys['replicas']
-        topics.append({ "name": mappedName, "partitions": 1, "replication_factor": kafka_replicas })
-
-        pvc_name = f"{mappedName}-pvc"
-        job_name = f"{mappedName}-job"
-        data = split_calls_to_replicas(calls.get(mappedName, {}), replicas, mappedName, choice)
-        data_str = json.dumps(data).replace('"', '\\"')
-
-        # Create PVC and Jobs for other containers
-        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, data_str=data_str)
-        create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
-
-    # Handle DB containers differently
-    for service_name, container_keys in memcached_values.items():
-        memcached_mappedName = container_keys['mappedName']
-        replicas = container_keys.get('replicas', 1)
-
-        # Step 1: Create headless service for PostgreSQL container (for replication)
-        create_memcached_service(v1, NAMESPACE, memcached_mappedName)
-        create_container_service(v1, NAMESPACE, memcached_mappedName, [{ "port": 6379, "target_port": 6379, 'name': 'redis-port' }])
-
-        # # Step 2: Create PostgreSQL StatefulSet with replication support
-        pvc_name = f"{memcached_mappedName}-pvc"
-        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
-        create_redis_statefulset(apps_v1, NAMESPACE, memcached_mappedName, pvc_name, replicas=replicas)
-
-    # Handle DB containers differently
-    for service_name, container_keys in db_values.items():
-        db_mappedName = container_keys['mappedName']
-        replicas = container_keys.get('replicas', 1)
-
-        # Step 1: Create headless service for PostgreSQL container (for replication)
-        create_db_headless_service(v1, NAMESPACE, db_mappedName)
-        create_container_service(v1, NAMESPACE, db_mappedName, [{ "port": 5432, "target_port": 5432, 'name': 'postgresql' }])
-
-        # Step 2: Create PostgreSQL StatefulSet with replication support
-        pvc_name = f"{db_mappedName}-pvc"
-        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
-        create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
-    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
-    delete_all_configmaps(v1, NAMESPACE)
-    delete_completed_jobs(batch_v1, v1, NAMESPACE)
-    wait_for_pods_ready(NAMESPACE)
-    for service_name, container_keys in memcached_values.items():
-        db_mappedName = container_keys['mappedName']
-        create_redis_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
-
-    for service_name, container_keys in db_values.items():
-        db_mappedName = container_keys['mappedName']
-        create_postgres_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
-    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
-    delete_all_configmaps(v1, NAMESPACE)
-    delete_completed_jobs(batch_v1, v1, NAMESPACE)
+    # Construct the kubectl command
+    command = f"kubectl cp {source_path} {target_path} -n {namespace}"
     
-    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT, NODE_IP)
+    try:
+        # Execute the command
+        print(f"Executing command: {command}")
+        subprocess.run(command, shell=True, check=True)
+        print(f"Logs successfully copied to ~/Downloads/{logs_file}")
+    except subprocess.CalledProcessError as e:
+        print(f"Error occurred while copying logs: {e}")
+    
+def run_destroy_script():
+    """
+    Executes the destroy.py script located in the same directory.
+    """
+    script_path = os.path.join(os.getcwd(), "destroy.py")
+    
+    try:
+        print(f"Running {script_path}...")
+        subprocess.run(["python", script_path], check=True)
+        print("destroy.py executed successfully.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error while running destroy.py: {e}")
+    except FileNotFoundError:
+        print("destroy.py not found in the current directory.")   
 
-    # Assign container jobs
-    renamed_containers = addContainerJob(renamed_containers)
+def main():
+    
+    waiting_time = float(input("Enter the waiting time for logs in seconds: "))
+    service_num = int(input("Enter the service number: "))
+    
+     for model_type in range(2):  # 0 or 1
+        for assignment_type in range(2):  # 0 or 1
+            for background_task_config in range(3):  # 0, 1, 2
+                for server_stress_config in range(8):  # 0 to 7
+                    for iteration in range(3): # 0 to 2
+                        print("Iteration: " + iteration)
+                        
+                        
+                        NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
+                        KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "32092"))
+                        NODE_IP = os.getenv("NODE_IP", "localhost")
+                        STORAGE_CLASS = "nfs-client"
+                        config.load_kube_config()
 
-    # Handle non-DB containers
-    for container_name in renamed_containers:
-        containerKeys = renamed_containers[container_name]
-        mappedName = containerKeys['mappedName']
-        containerJob = containerKeys['containerJob']
-        replicas = containerKeys['replicas']
+                        v1 = client.CoreV1Api()
+                        apps_v1 = client.AppsV1Api()  # Correct API object for StatefulSets
+                        rbac_v1 = client.RbacAuthorizationV1Api()
+                        batch_v1 = client.BatchV1Api()
 
-        # Create services for each container
-        create_container_service(v1, NAMESPACE, mappedName, [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
+                        get_or_create_namespace(NAMESPACE)
 
-        pvc_name = f"{mappedName}-pvc"
-        # Use apps_v1 for creating StatefulSets
-        create_container_statefulset(apps_v1, NAMESPACE, mappedName, pvc_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
+                        #selecting normal or probabilistic model;
+                        calls_file = "calls.json"
+                        match model_type:
+                            case 2: 
+                                # Generate new_calls.json based on probabilities.json
+                                probabilities_file = "probabilities.json"
+                                print("Generating new_calls.json using the probabilistic model...")
+                                #segregated_services = segregate_receiving_services(calls_file, probabilities_file)
+                                generate_new_calls(calls_file, probabilities_file)
+                                calls_file = "new_calls.json"  # Switch to using new_calls.json
+                                print("Generated new_calls.json successfully.")
 
 
-    # Wait for all StatefulSets to be ready (including DB StatefulSets)
-    wait_for_pods_ready(NAMESPACE)
+                        # Deploy Kafka and get kafka_replicas
+                        (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
 
-    print("All statefulsets, deployments, and services are up in Kubernetes.")
-    port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
+                        renamed_containers, calls = get_and_rename_containers(containersFile="containers.json", callsFile=calls_file)
 
+                        # Deploy Redis and get redis_ip
+                        deploy_redis_environment(NAMESPACE, v1, apps_v1)
+                        redis_service_name = 'redis-service'
+                        wait_for_pods_ready(NAMESPACE)
+
+                        # Call logging service setup (after Redis is ready)
+                        print(redis_service_name)
+                        create_logging_statefulset(apps_v1, NAMESPACE, redis_service_name, STORAGE_CLASS)
+                        create_logging_service(v1, NAMESPACE)
+
+                        # Get containers and calls data
+                        db_values, memcached_values = extract_remove_memcached_db_containers(renamed_containers, calls)
+                        
+                        
+                        # Define topics for Kafka (includes DB containers)
+                        topics = []
+
+                        # Handle other containers
+                        for container in renamed_containers:
+                            containerKeys = renamed_containers[container]
+                            mappedName = containerKeys['mappedName']
+                            replicas = containerKeys['replicas']
+                            topics.append({ "name": mappedName, "partitions": 1, "replication_factor": kafka_replicas })
+
+                            pvc_name = f"{mappedName}-pvc"
+                            job_name = f"{mappedName}-job"
+                            
+                            # Random or round robin choice
+                            data = split_calls_to_replicas(calls.get(mappedName, {}), replicas, mappedName, assignment_type)
+                            data_str = json.dumps(data).replace('"', '\\"')
+
+                            # Create PVC and Jobs for other containers
+                            create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, data_str=data_str)
+                            create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
+
+                        # Handle DB containers differently
+                        for service_name, container_keys in memcached_values.items():
+                            memcached_mappedName = container_keys['mappedName']
+                            replicas = container_keys.get('replicas', 1)
+
+                            # Step 1: Create headless service for PostgreSQL container (for replication)
+                            create_memcached_service(v1, NAMESPACE, memcached_mappedName)
+                            create_container_service(v1, NAMESPACE, memcached_mappedName, [{ "port": 6379, "target_port": 6379, 'name': 'redis-port' }])
+
+                            # # Step 2: Create PostgreSQL StatefulSet with replication support
+                            pvc_name = f"{memcached_mappedName}-pvc"
+                            create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
+                            create_redis_statefulset(apps_v1, NAMESPACE, memcached_mappedName, pvc_name, replicas=replicas)
+
+                        # Handle DB containers differently
+                        for service_name, container_keys in db_values.items():
+                            db_mappedName = container_keys['mappedName']
+                            replicas = container_keys.get('replicas', 1)
+
+                            # Step 1: Create headless service for PostgreSQL container (for replication)
+                            create_db_headless_service(v1, NAMESPACE, db_mappedName)
+                            create_container_service(v1, NAMESPACE, db_mappedName, [{ "port": 5432, "target_port": 5432, 'name': 'postgresql' }])
+
+                            # Step 2: Create PostgreSQL StatefulSet with replication support
+                            pvc_name = f"{db_mappedName}-pvc"
+                            create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
+                            create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
+                            
+                            
+                        wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
+                        delete_all_configmaps(v1, NAMESPACE)
+                        delete_completed_jobs(batch_v1, v1, NAMESPACE)
+                        wait_for_pods_ready(NAMESPACE)
+                        for service_name, container_keys in memcached_values.items():
+                            db_mappedName = container_keys['mappedName']
+                            create_redis_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
+
+                        for service_name, container_keys in db_values.items():
+                            db_mappedName = container_keys['mappedName']
+                            create_postgres_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
+                        wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
+                        delete_all_configmaps(v1, NAMESPACE)
+                        delete_completed_jobs(batch_v1, v1, NAMESPACE)
+                        
+                        create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT, NODE_IP)
+
+                        
+                        # Assign container jobs
+                        renamed_containers = addContainerJob(renamed_containers, background_task_config + 1, service_num)
+
+                        # Handle non-DB containers
+                        for container_name in renamed_containers:
+                            containerKeys = renamed_containers[container_name]
+                            mappedName = containerKeys['mappedName']
+                            containerJob = containerKeys['containerJob']
+                            replicas = containerKeys['replicas']
+
+                            # Create services for each container
+                            create_container_service(v1, NAMESPACE, mappedName, [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
+
+                            pvc_name = f"{mappedName}-pvc"
+                            # Use apps_v1 for creating StatefulSets
+                            create_container_statefulset(apps_v1, NAMESPACE, mappedName, pvc_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
+
+
+                        # Wait for all StatefulSets to be ready (including DB StatefulSets)
+                        wait_for_pods_ready(NAMESPACE)
+                        print("All statefulsets, deployments, and services are up in Kubernetes.")
+                        
+                        #Stressing server with set configuration
+                        stress_servers(server_stress_config)
+                        
+                        # set start time in Redis and start communication
+                        port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
+                        
+                        # waiting for communication to finish
+                        time.sleep(waiting_time)
+                        
+                        # copying logs to local
+                        log_filename = f"{service_num}_{model_type}_{assignment_type}_{background_task_config}_{server_stress_config}_take{iteration}.csv"
+                        copy_logs_to_local(logs_filename)
+                        
+                        # destory containers and statefulsets
+                        run_destroy_script()
+                        time.sleep(60)
 
 if __name__ == "__main__":
     main()

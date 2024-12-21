@@ -1,0 +1,100 @@
+{
+    "MS_9105": {
+        "0": [
+            {
+                "dm_service": "MS_9105",
+                "communication_type": "rpc"
+            }
+        ],
+        "1": [
+            {
+                "dm_service": "MS_28815",
+                "communication_type": "rpc"
+            }
+        ],
+        "23": [
+            {
+                "dm_service": "MS_28815",
+                "communication_type": "rpc"
+            }
+        ],
+        "28": [
+            {
+                "dm_service": "MS_9105",
+                "communication_type": "rpc"
+            }
+        ],
+        "29": [
+            {
+                "dm_service": "MS_9105",
+                "communication_type": "rpc"
+            }
+        ],
+        "36": [
+            {
+                "dm_service": "MS_9105",
+                "communication_type": "rpc"
+            }
+        ],
+        "39": [
+            {
+                "dm_service": "MS_28815",
+                "communication_type": "rpc"
+            }
+        ],
+        "42": [
+            {
+                "dm_service": "MS_56140",
+                "communication_type": "mq"
+            }
+        ],
+        "51": [
+            {
+                "dm_service": "MS_9105",
+                "communication_type": "rpc"
+            }
+        ],
+        "53": [
+            {
+                "dm_service": "MS_9105",
+                "communication_type": "rpc"
+            }
+        ],
+        "54": [
+            {
+                "dm_service": "MS_9105",
+                "communication_type": "rpc"
+            }
+        ]
+    },
+    "MS_56140": {
+        "75": [
+            {
+                "dm_service": "MS_56140",
+                "communication_type": "mq"
+            }
+        ]
+    },
+    "MS_30701": {
+        "112": [
+            {
+                "dm_service": "MS_28815",
+                "communication_type": "mq"
+            }
+        ]
+    },
+    "MS_39666": {
+        "207": [
+            {
+                "dm_service": "MS_56140",
+                "communication_type": "mq"
+            }
+        ],
+        "208": [
+            {
+                "dm_service": "MS_28815",
+                "communication_type": "mq"
+            }
+        ]
+    }
+}

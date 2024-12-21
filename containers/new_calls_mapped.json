@@ -1,0 +1,100 @@
+{
+    "s3": {
+        "0": [
+            {
+                "dm_service": "s3",
+                "communication_type": "rpc"
+            }
+        ],
+        "1": [
+            {
+                "dm_service": "s11",
+                "communication_type": "rpc"
+            }
+        ],
+        "23": [
+            {
+                "dm_service": "s11",
+                "communication_type": "rpc"
+            }
+        ],
+        "28": [
+            {
+                "dm_service": "s3",
+                "communication_type": "rpc"
+            }
+        ],
+        "29": [
+            {
+                "dm_service": "s3",
+                "communication_type": "rpc"
+            }
+        ],
+        "36": [
+            {
+                "dm_service": "s3",
+                "communication_type": "rpc"
+            }
+        ],
+        "39": [
+            {
+                "dm_service": "s11",
+                "communication_type": "rpc"
+            }
+        ],
+        "42": [
+            {
+                "dm_service": "s12",
+                "communication_type": "mq"
+            }
+        ],
+        "51": [
+            {
+                "dm_service": "s3",
+                "communication_type": "rpc"
+            }
+        ],
+        "53": [
+            {
+                "dm_service": "s3",
+                "communication_type": "rpc"
+            }
+        ],
+        "54": [
+            {
+                "dm_service": "s3",
+                "communication_type": "rpc"
+            }
+        ]
+    },
+    "s12": {
+        "75": [
+            {
+                "dm_service": "s12",
+                "communication_type": "mq"
+            }
+        ]
+    },
+    "s22": {
+        "112": [
+            {
+                "dm_service": "s11",
+                "communication_type": "mq"
+            }
+        ]
+    },
+    "s21": {
+        "207": [
+            {
+                "dm_service": "s12",
+                "communication_type": "mq"
+            }
+        ],
+        "208": [
+            {
+                "dm_service": "s11",
+                "communication_type": "mq"
+            }
+        ]
+    }
+}

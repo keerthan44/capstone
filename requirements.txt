@@ -8,3 +8,4 @@ confluent-kafka
 grpcio-tools
 grpcio
 psycopg2-binary
+requests
