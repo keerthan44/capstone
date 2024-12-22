@@ -981,13 +981,13 @@ def split_calls_to_replicas(data, replicas, mappedName, choice):
     # Convert data into a list of calls, each with a timestamp
     calls = [(t, call) for t, calls_list in data.items() for call in calls_list]
     
-    if choice == "1":
+    if choice == 1 :
         # Distribute calls in a round-robin fashion
         for idx, (timestamp, call) in enumerate(calls):
             statefulset_index = idx % replicas
             result[f"{mappedName}-statefulset-{statefulset_index}"][timestamp].append(call)
     
-    elif choice == "0":
+    elif choice == 0 :
         # Distribute calls randomly
         for timestamp, call in calls:
             statefulset_index = random.randint(0, replicas - 1)
