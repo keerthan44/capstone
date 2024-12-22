@@ -61,7 +61,8 @@ def create_kafka_headless_service(v1, namespace):
 
 def create_kafka_statefulset(apps_v1, namespace):
     # Ask the user for the number of replicas
-    replicas = int(input("Enter the number of Kafka replicas: "))
+    # replicas = int(input("Enter the number of Kafka replicas: "))
+    replicas = 2 #static for now 
 
     container = V1Container(
         name="kafka-instance",
@@ -106,7 +107,8 @@ def create_kafka_statefulset(apps_v1, namespace):
 
 
 def create_kafka_external_gateway_deployment(apps_v1, namespace):
-    replicas = int(input("Enter the number of Kafka External Gateway replicas: "))
+    # replicas = int(input("Enter the number of Kafka External Gateway replicas: "))
+    replicas = 1 #static for now
     """Create a Kubernetes Deployment."""
     container = client.V1Container(
         name="kafka-external-gateway",
