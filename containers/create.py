@@ -1227,7 +1227,7 @@ def main():
             for background_task_config in range(3):  # 0, 1, 2
                 for server_stress_config in range(8):  # 0 to 7
                     for iteration in range(3): # 0 to 2
-                        print("Iteration: " + iteration)
+                        print(f"Iteration: {iteration}")
                         
                         
                         NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
