@@ -1222,7 +1222,7 @@ def main():
     waiting_time = float(input("Enter the waiting time for logs in seconds: "))
     service_num = int(input("Enter the service number: "))
     
-     for model_type in range(2):  # 0 or 1
+    for model_type in range(2):  # 0 or 1
         for assignment_type in range(2):  # 0 or 1
             for background_task_config in range(3):  # 0, 1, 2
                 for server_stress_config in range(8):  # 0 to 7
