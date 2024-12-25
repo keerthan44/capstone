@@ -1377,7 +1377,7 @@ def main():
                         time.sleep(waiting_time)
                         
                         # copying logs to local
-                        log_filename = f"{service_num}_{model_type}_{assignment_type}_{background_task_config}_{server_stress_config}_take{iteration}.csv"
+                        logs_filename = f"{service_num}_{model_type}_{assignment_type}_{background_task_config}_{server_stress_config}_take{iteration}.csv"
                         copy_logs_to_local(logs_filename)
                         
                         # destory containers and statefulsets
