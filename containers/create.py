@@ -1105,36 +1105,36 @@ def server_ip_random_sampling(server_stress_config):
         workers = 0
         
         match server_stress_config:
-        case 0:
-            print("No server stress applied.")
-        case 1:
-            print("Stressing master node.")
-            node_name="master"
-            workers=0
-        case 2:
-            print("Stressing master node and 1 worker.")
-            node_name="master"
-            workers=1
-        case 3:
-            print("Stressing master node and 2 workers.")
-            node_name="master"
-            workers=2
-        case 4:
-            print("Stressing 1 worker node only (not master).")
-            node_name=None 
-            workers=1
-        case 5:
-            print("Stressing 2 worker nodes.")
-            node_name=None
-            workers=2
-        case 6:
-            print("Stressing all 3 worker nodes.")
-            node_name=None
-            workers=3
-        case 7:
-            print("Stressing all nodes (master and 3 workers).")
-            node_name="master"
-            workers=3
+            case 0:
+                print("No server stress applied.")
+            case 1:
+                print("Stressing master node.")
+                node_name="master"
+                workers=0
+            case 2:
+                print("Stressing master node and 1 worker.")
+                node_name="master"
+                workers=1
+            case 3:
+                print("Stressing master node and 2 workers.")
+                node_name="master"
+                workers=2
+            case 4:
+                print("Stressing 1 worker node only (not master).")
+                node_name=None 
+                workers=1
+            case 5:
+                print("Stressing 2 worker nodes.")
+                node_name=None
+                workers=2
+            case 6:
+                print("Stressing all 3 worker nodes.")
+                node_name=None
+                workers=3
+            case 7:
+                print("Stressing all nodes (master and 3 workers).")
+                node_name="master"
+                workers=3
     
     master_ip = "10.10.3.27"
     worker_ips = ["10.10.3.25", "10.10.3.26", "10.10.3.28"]
