@@ -1100,57 +1100,63 @@ def generate_new_calls(calls_file, probabilities_file, output_file="new_calls.js
         json.dump(new_calls, output_f, indent=4)
     print(f"New calls file saved to {output_file}")
 
-def stress_servers(server_stress_config):
-    """
-    Function to apply stress based on the server stress configuration.
-    """
-    match server_stress_config:
+def server_ip_random_sampling(server_stress_config):
+        node_name = None
+        workers = 0
+        
+        match server_stress_config:
         case 0:
             print("No server stress applied.")
         case 1:
             print("Stressing master node.")
-            apply_stress(node_name="master", workers=0)
+            node_name="master"
+            workers=0
         case 2:
             print("Stressing master node and 1 worker.")
-            apply_stress(node_name="master", workers=1)
+            node_name="master"
+            workers=1
         case 3:
             print("Stressing master node and 2 workers.")
-            apply_stress(node_name="master", workers=2)
+            node_name="master"
+            workers=2
         case 4:
             print("Stressing 1 worker node only (not master).")
-            apply_stress(node_name=None, workers=1)
+            node_name=None 
+            workers=1
         case 5:
             print("Stressing 2 worker nodes.")
-            apply_stress(node_name=None, workers=2)
+            node_name=None
+            workers=2
         case 6:
             print("Stressing all 3 worker nodes.")
-            apply_stress(node_name=None, workers=3)
+            node_name=None
+            workers=3
         case 7:
             print("Stressing all nodes (master and 3 workers).")
-            apply_stress(node_name="master", workers=3)
-
-def apply_stress(node_name=None, workers=0):
-    """
-    Deploys a Kubernetes job to stress the specified nodes.
-    """
+            node_name="master"
+            workers=3
+    
     master_ip = "10.10.3.27"
     worker_ips = ["10.10.3.25", "10.10.3.26", "10.10.3.28"]
-
     stressed_nodes = []
-
+    
     if node_name == "master":
-        print(f"Stressing master node at {master_ip}.")
-        control_cpu_stressor(master_ip, "start")
         stressed_nodes.append(master_ip)
 
     if workers > 0:
         selected_workers = random.sample(worker_ips, workers)
-        for worker_ip in selected_workers:
-            print(f"Stressing worker node at {worker_ip}.")
-            control_cpu_stressor(worker_ip, "start")
-            stressed_nodes.append(worker_ip)
-
+        stressed_nodes.extend(selected_workers)
+        
     print(f"Stressed nodes: {stressed_nodes}")
+    return stressed_nodes
+
+def make_calls_to_stress_api(selected_nodes, startOrStop):
+    """
+    Deploys a Kubernetes job to stress the specified nodes.
+    """
+    for worker_ip in selected_nodes:
+        print(f"Making calls to server node at {worker_ip} with command {startOrStop}.")
+        control_cpu_stressor(worker_ip, startOrStop)
 
 def control_cpu_stressor(ip_address: str, command: str):
     """
@@ -1216,7 +1222,8 @@ def run_destroy_script():
     except subprocess.CalledProcessError as e:
         print(f"Error while running destroy.py: {e}")
     except FileNotFoundError:
-        print("destroy.py not found in the current directory.")   
+        print("destroy.py not found in the current directory.")
+           
 
 def main():
     
@@ -1369,13 +1376,17 @@ def main():
                         print("All statefulsets, deployments, and services are up in Kubernetes.")
                         
                         #Stressing server with set configuration
-                        stress_servers(server_stress_config)
+                        stressed_nodes = server_ip_random_sampling(server_stress_config)
+                        make_calls_to_stress_api(stressed_nodes, "start")
                         
                         # set start time in Redis and start communication
                         port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
                         
                         # waiting for communication to finish
                         time.sleep(waiting_time)
+                        
+                        #stopping cpu stress
+                        make_calls_to_stress_api(stressed_nodes, "stop")
                         
                         # copying logs to local
                         logs_filename = f"{service_num}_{model_type}_{assignment_type}_{background_task_config}_{server_stress_config}_take{iteration}.csv"
