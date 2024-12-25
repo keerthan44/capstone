@@ -120,13 +120,13 @@ def extract_remove_memcached_db_containers(renamed_containers, calls):
 def addContainerJob(containers, option, service_num):
     while True:
         match option:
-            case '1': 
+            case 1: 
                 return {container: {**containers[container], "containerJob": 0} for container in containers}
-            case '3': 
+            case 3: 
                 return {container: {**containers[container], "containerJob": 1} for container in containers}
-            case '2':
-                print("You can enter the containers that are working in ranges like 1-5, 7-10")
-                print("1-1(includes both 1 and 1), 1-4(includes 1, 2, 3, 4)")
+            case 2:
+                # print("You can enter the containers that are working in ranges like 1-5, 7-10")
+                # print("1-1(includes both 1 and 1), 1-4(includes 1, 2, 3, 4)")
                 # containersWorking = input("Enter the containers that are working: ").replace(" ", "").split(",")
                 
                 #hardcoded to first half of containers have background tasks
