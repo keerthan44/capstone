@@ -13,6 +13,7 @@ import psycopg2
 import random
 import time
 import requests
+import subprocess
 
 
 load_dotenv()  # take environment variables from .env.
