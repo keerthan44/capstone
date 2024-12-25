@@ -1221,6 +1221,8 @@ def main():
     
     waiting_time = float(input("Enter the waiting time for logs in seconds: "))
     service_num = int(input("Enter the service number: "))
+    kafka_replicas_num = int(input("Enter the number of kafka replicas: "))
+    gateway_replicas_num = int(input("Enter the number of gateway replicas: "))
     
     for model_type in range(2):  # 0 or 1
         for assignment_type in range(2):  # 0 or 1
@@ -1257,7 +1259,7 @@ def main():
 
 
                         # Deploy Kafka and get kafka_replicas
-                        (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT)
+                        (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kakfa_gateway_service_name) = deploy_kafka_environment(NAMESPACE, v1, apps_v1, rbac_v1, KAFKA_EXTERNAL_GATEWAY_NODEPORT, kafka_replicas_num, gateway_replicas_num)
 
                         renamed_containers, calls = get_and_rename_containers(containersFile="containers.json", callsFile=calls_file)
 

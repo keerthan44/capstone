@@ -59,11 +59,12 @@ def create_kafka_headless_service(v1, namespace):
     return response.metadata.name  # Return the name of the created service
 
 
-def create_kafka_statefulset(apps_v1, namespace):
+def create_kafka_statefulset(apps_v1, namespace, kafka_replicas_num):
     # Ask the user for the number of replicas
     # replicas = int(input("Enter the number of Kafka replicas: "))
-    replicas = 2 #static for now 
-
+     
+    replicas = kafka_replicas_num
+    
     container = V1Container(
         name="kafka-instance",
         image="wurstmeister/kafka",
@@ -106,9 +107,10 @@ def create_kafka_statefulset(apps_v1, namespace):
     return replicas, response.metadata.name
 
 
-def create_kafka_external_gateway_deployment(apps_v1, namespace):
+def create_kafka_external_gateway_deployment(apps_v1, namespace, gateway_replicas_num):
     # replicas = int(input("Enter the number of Kafka External Gateway replicas: "))
-    replicas = 1 #static for now
+    replicas = gateway_replicas_num
+    
     """Create a Kubernetes Deployment."""
     container = client.V1Container(
         name="kafka-external-gateway",
@@ -265,19 +267,19 @@ def create_topics_http_request(topics, namespace, kafka_statefulset_name, kafka_
         attempt += 1
 
 
-def deploy_kafka_environment(namespace, v1, apps_v1, rbac_v1, kafka_external_gateway_nodeport):
+def deploy_kafka_environment(namespace, v1, apps_v1, rbac_v1, kafka_external_gateway_nodeport, kafka_replicas_num, gateway_replicas_num):
     # Deploy Zookeeper
     create_zookeeper_service(v1, namespace)
     create_zookeeper_statefulset(apps_v1, namespace)
     wait_for_pods_ready(namespace)
     # Deploy Kafka
     kafka_headless_service_name = create_kafka_headless_service(v1, namespace)
-    (kafka_replicas, kafka_statefulset_name) = create_kafka_statefulset(apps_v1, namespace)
+    (kafka_replicas, kafka_statefulset_name) = create_kafka_statefulset(apps_v1, namespace, kafka_replicas_num)
 
     # Deploy Kafka External Gateway
     create_or_update_kafka_external_gateway_role_and_rolebinding(rbac_v1, namespace)
     kafka_gateway_service_name = create_kafka_external_gateway_service(v1, namespace, kafka_external_gateway_nodeport)
-    create_kafka_external_gateway_deployment(apps_v1, namespace)
+    create_kafka_external_gateway_deployment(apps_v1, namespace, gateway_replicas_num)
     return (kafka_replicas, kafka_statefulset_name, kafka_headless_service_name, kafka_gateway_service_name)
 
 
