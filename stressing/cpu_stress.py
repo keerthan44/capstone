@@ -5,6 +5,7 @@ import signal
 import sys
 import os
 import threading
+import subprocess
 from flask import Flask, jsonify
 from statistics import mean
 
@@ -94,6 +95,15 @@ class CPUStressor:
 
             time.sleep(0.2)
 
+    def setup_firewall(self):
+        """Ensure port 5000 is open in the firewall."""
+        try:
+            subprocess.run(["sudo", "ufw", "allow", "5000"], check=True)
+            subprocess.run(["sudo", "ufw", "status"], check=True)
+            print("Firewall setup completed successfully.")
+        except subprocess.CalledProcessError as e:
+            print(f"Error during firewall setup: {e}")
+
     def start(self):
         self.running = True
         self.stress_thread = threading.Thread(target=self.adjust_load)
@@ -147,6 +157,10 @@ if __name__ == "__main__":
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+
+    # Firewall setup
+    print("Configuring firewall...")
+    stressor.setup_firewall()
 
     print("Starting Flask server on port 5000...")
     print("Available endpoints:")
