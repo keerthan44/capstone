@@ -1234,6 +1234,8 @@ def main():
     kafka_replicas_num = int(input("Enter the number of kafka replicas: "))
     gateway_replicas_num = int(input("Enter the number of gateway replicas: "))
     
+    start_processing = False
+    
     for model_type in range(2):  # 0 or 1
         for assignment_type in range(2):  # 0 or 1
             for background_task_config in range(3):  # 0, 1, 2
@@ -1241,6 +1243,12 @@ def main():
                     for iteration in range(3): # 0 to 2
                         print(f"Iteration: {iteration}")
                         
+                        logs_filename = f"{service_num}_{model_type}_{assignment_type}_{background_task_config}_{server_stress_config}_take{iteration}.csv"
+                        if(logs_filename == "32_0_1_2_6_take0.csv"):
+                            start_processing = True
+                        
+                        if not start_processing:
+                            continue
                         
                         NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
                         KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "32092"))
@@ -1391,7 +1399,6 @@ def main():
                         make_calls_to_stress_api(stressed_nodes, "stop")
                         
                         # copying logs to local
-                        logs_filename = f"{service_num}_{model_type}_{assignment_type}_{background_task_config}_{server_stress_config}_take{iteration}.csv"
                         copy_logs_to_local(logs_filename)
                         
                         # destory containers and statefulsets
