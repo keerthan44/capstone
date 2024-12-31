@@ -1241,10 +1241,10 @@ def main():
             for background_task_config in range(3):  # 0, 1, 2
                 for server_stress_config in range(8):  # 0 to 7
                     for iteration in range(3): # 0 to 2
-                        print(f"Iteration: {iteration}")
+                        print(f"Running iteration: {service_num}_{model_type}_{assignment_type}_{background_task_config}_{server_stress_config}_take{iteration}")
                         
                         logs_filename = f"{service_num}_{model_type}_{assignment_type}_{background_task_config}_{server_stress_config}_take{iteration}.csv"
-                        if(logs_filename == "32_1_1_0_0_take2.csv"):
+                        if(logs_filename == "32_1_1_2_0_take2.csv"):
                             start_processing = True
                         
                         if not start_processing:
