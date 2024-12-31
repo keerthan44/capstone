@@ -1233,7 +1233,7 @@ def main():
     service_num = int(input("Enter the service number: "))
     kafka_replicas_num = int(input("Enter the number of kafka replicas: "))
     gateway_replicas_num = int(input("Enter the number of gateway replicas: "))
-    waiting_time_before_destroying = int(intput("Enter the waiting time before destroying containers in seconds: "))
+    waiting_time_before_destroying = int(input("Enter the waiting time before destroying containers in seconds: "))
     
     start_processing = False
     
