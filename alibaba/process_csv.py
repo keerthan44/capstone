@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from collections import defaultdict
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
 target_dir = os.path.join(current_dir, "..", "containers")
 
 def read_and_sort_csv(file_name):
