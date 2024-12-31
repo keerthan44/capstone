@@ -125,7 +125,7 @@ def process_probabilities(file_name):
     probability_results['probabilities'] = probabilities
 
     probabilities_output_file = os.path.join(target_dir, "probabilities.json")
-    with open(probabilities, 'w') as f:
+    with open(probabilities_output_file, 'w') as f:
         json.dump(probability_results, f, indent=4)
 
     print("Processing complete. 'probabilities.json' has been written.")
