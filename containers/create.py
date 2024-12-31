@@ -1233,6 +1233,7 @@ def main():
     service_num = int(input("Enter the service number: "))
     kafka_replicas_num = int(input("Enter the number of kafka replicas: "))
     gateway_replicas_num = int(input("Enter the number of gateway replicas: "))
+    waiting_time_before_destroying = int(intput("Enter the waiting time before destroying containers in seconds: "))
     
     start_processing = False
     
@@ -1403,7 +1404,7 @@ def main():
                         
                         # destory containers and statefulsets
                         run_destroy_script()
-                        time.sleep(60)
+                        time.sleep(waiting_time_before_destroying)
 
 if __name__ == "__main__":
     main()
