@@ -1235,7 +1235,7 @@ def main():
     gateway_replicas_num = int(input("Enter the number of gateway replicas: "))
     waiting_time_before_destroying = int(input("Enter the waiting time before destroying containers in seconds: "))
     
-    # start_processing = False
+    start_processing = False
     
     for model_type in range(2):  # 0 or 1
         for assignment_type in range(2):  # 0 or 1
@@ -1246,11 +1246,11 @@ def main():
                         
                         logs_filename = f"{service_num}_{model_type}_{assignment_type}_{background_task_config}_{server_stress_config}_take{iteration}.csv"
                         
-                        # if(logs_filename == "32_1_1_2_0_take2.csv"):
-                        #     start_processing = True
+                        if(logs_filename == "32_0_0_2_5_take2.csv"):
+                            start_processing = True
                         
-                        # if not start_processing:
-                        #     continue
+                        if not start_processing:
+                            continue
                         
                         NAMESPACE = os.getenv("KUBERNETES_NAMESPACE", "static-application")
                         KAFKA_EXTERNAL_GATEWAY_NODEPORT = int(os.getenv("KAFKA_EXTERNAL_GATEWAY_NODEPORT", "32092"))
