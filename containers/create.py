@@ -1160,7 +1160,7 @@ def generate_timestamps_with_exponential(original_data, lambda_=5.0, output_file
         original_data (dict): Original JSON-like dictionary with upstream microservices.
         lambda_ (float): Rate parameter for the exponential distribution.
         output_file (str): Name of the output JSON file.
-    
+
     Returns:
         None: Writes the output to a JSON file.
     """
@@ -1183,39 +1183,48 @@ def generate_timestamps_with_exponential(original_data, lambda_=5.0, output_file
         min_original = min(original_timestamps)
         max_original = max(original_timestamps) if len(original_timestamps) > 1 else min_original + 1
 
-        # Handle cases where total_downstreams is less than 2
-        if total_downstreams < 2:
+        # Handle cases where total_downstreams <= 2
+        if total_downstreams <= 2:
             final_timestamps = original_timestamps
         else:
             # Generate inter-arrival times and cumulative timestamps
             inter_arrival_times = np.random.exponential(scale=1 / lambda_, size=total_downstreams - 2)
-            generated_timestamps = np.cumsum(inter_arrival_times).astype(int)
+            if inter_arrival_times.size == 0:
+                # Fallback to evenly spaced timestamps if the array is empty
+                final_timestamps = original_timestamps
+            else:
+                generated_timestamps = np.cumsum(inter_arrival_times).astype(int)
 
-            # Scale the generated timestamps to match the original range, excluding first and last
-            scaled_timestamps = np.interp(
-                generated_timestamps,
-                (generated_timestamps.min(), generated_timestamps.max()),
-                (min_original + 1, max_original - 1)
-            ).astype(int)
+                # Scale the generated timestamps to match the original range, excluding first and last
+                scaled_timestamps = np.interp(
+                    generated_timestamps,
+                    (generated_timestamps.min(), generated_timestamps.max()),
+                    (min_original + 1, max_original - 1)
+                ).astype(int)
 
-            # Include the first and last timestamps explicitly
-            final_timestamps = np.concatenate(([min_original], scaled_timestamps, [max_original]))
+                # Include the first and last timestamps explicitly
+                final_timestamps = np.concatenate(([min_original], scaled_timestamps, [max_original]))
 
         # Ensure the first call is preserved dynamically
         if not first_call_preserved and um_service == first_service and first_timestamp:
-            new_data[first_service][first_timestamp] = [{"dm_service": "", "communication_type": ""} for _ in original_data[first_service][first_timestamp] if _]
+            # Preserve the original first call exactly as it is
+            new_data[first_service][first_timestamp] = original_data[first_service][first_timestamp]
             first_call_preserved = True
 
         # Distribute downstream entries across timestamps
         for ts in final_timestamps:
-            if um_service != first_service and ts == int(first_timestamp):
-                continue  # Ensure no other service uses the first timestamp
+            # Skip adding entries to the preserved first timestamp
+            if um_service == first_service and ts == int(first_timestamp):
+                continue
 
             ts_str = str(ts)
             if ts_str not in new_data[um_service]:
                 new_data[um_service][ts_str] = []
-            # Add a downstream entry to this timestamp
-            new_data[um_service][ts_str].append({"dm_service": "", "communication_type": ""})
+
+            # Add a downstream entry to this timestamp if it doesn't already exist
+            entry = {"dm_service": "", "communication_type": ""}
+            if entry not in new_data[um_service][ts_str]:
+                new_data[um_service][ts_str].append(entry)
 
     # Write the result to a JSON file
     with open(output_file, "w") as f:
@@ -1225,14 +1234,6 @@ def generate_timestamps_with_exponential(original_data, lambda_=5.0, output_file
 def generate_timestamps_with_zipfian(original_data, zipf_s=1.5, output_file="generated_timestamps.json"):
     """
     Generate timestamps for each upstream microservice using a Zipfian distribution.
-
-    Args:
-        original_data (dict): Original JSON-like dictionary with upstream microservices.
-        zipf_s (float): The parameter of the Zipfian distribution (skewness).
-        output_file (str): Name of the output JSON file.
-    
-    Returns:
-        None: Writes the output to a JSON file.
     """
     new_data = {}
     first_call_preserved = False  # Track if the first call has been handled
@@ -1254,19 +1255,20 @@ def generate_timestamps_with_zipfian(original_data, zipf_s=1.5, output_file="gen
         max_original = max(original_timestamps) if len(original_timestamps) > 1 else min_original + 1
         timestamp_range = max_original - min_original
 
+        # Handle cases where total_downstreams < 2
         if total_downstreams < 2:
-            # If not enough downstreams to generate Zipfian samples, use the original timestamps
+            # Use the original timestamps if not enough downstreams
             final_timestamps = original_timestamps
         else:
             # Generate timestamps using Zipfian distribution
             zipf_samples = np.random.zipf(zipf_s, total_downstreams - 2)
-            if zipf_samples.max() == zipf_samples.min():
-                # If all values are identical, distribute timestamps evenly
+            if zipf_samples.size == 0 or zipf_samples.max() == zipf_samples.min():
+                # If all values are identical or the array is empty, distribute timestamps evenly
                 normalized_samples = np.linspace(0, 1, total_downstreams - 2)
             else:
                 # Normalize samples to [0, 1]
                 normalized_samples = (zipf_samples - zipf_samples.min()) / (zipf_samples.max() - zipf_samples.min())
-            
+
             # Scale timestamps to match original range, excluding first and last
             scaled_timestamps = (normalized_samples * (timestamp_range - 2) + min_original + 1).astype(int)
 
@@ -1275,9 +1277,13 @@ def generate_timestamps_with_zipfian(original_data, zipf_s=1.5, output_file="gen
 
         # Ensure the first call is preserved dynamically
         if not first_call_preserved and um_service == first_service and first_timestamp:
-            new_data[first_service][first_timestamp] = [{"dm_service": "", "communication_type": ""} for _ in original_data[first_service][first_timestamp] if _]
+            new_data[first_service][first_timestamp] = [
+                {"dm_service": "", "communication_type": ""}
+                for _ in original_data[first_service][first_timestamp] if _
+            ]
             first_call_preserved = True
 
+        # Distribute downstream entries across timestamps
         # Distribute downstream entries across timestamps
         for ts in final_timestamps:
             if um_service != first_service and ts == int(first_timestamp):
@@ -1286,8 +1292,11 @@ def generate_timestamps_with_zipfian(original_data, zipf_s=1.5, output_file="gen
             ts_str = str(ts)
             if ts_str not in new_data[um_service]:
                 new_data[um_service][ts_str] = []
-            # Add a downstream entry to this timestamp
-            new_data[um_service][ts_str].append({"dm_service": "", "communication_type": ""})
+
+            # Check if the entry already exists before appending
+            entry = {"dm_service": "", "communication_type": ""}
+            if entry not in new_data[um_service][ts_str]:
+                new_data[um_service][ts_str].append(entry)
 
     with open(output_file, "w") as f:
         json.dump(new_data, f, indent=4)
@@ -1511,109 +1520,109 @@ def main():
 
     renamed_containers, calls = get_and_rename_containers(containersFile="containers.json", callsFile=calls_file)
 
-    # Deploy Redis and get redis_ip
-    deploy_redis_environment(NAMESPACE, v1, apps_v1)
-    redis_service_name = 'redis-service'
-    wait_for_pods_ready(NAMESPACE)
+    # # Deploy Redis and get redis_ip
+    # deploy_redis_environment(NAMESPACE, v1, apps_v1)
+    # redis_service_name = 'redis-service'
+    # wait_for_pods_ready(NAMESPACE)
 
-    # Call logging service setup (after Redis is ready)
-    print(redis_service_name)
-    create_logging_statefulset(apps_v1, NAMESPACE, redis_service_name, STORAGE_CLASS)
-    create_logging_service(v1, NAMESPACE)
+    # # Call logging service setup (after Redis is ready)
+    # print(redis_service_name)
+    # create_logging_statefulset(apps_v1, NAMESPACE, redis_service_name, STORAGE_CLASS)
+    # create_logging_service(v1, NAMESPACE)
 
-    # Get containers and calls data
-    db_values, memcached_values = extract_remove_memcached_db_containers(renamed_containers, calls)
+    # # Get containers and calls data
+    # db_values, memcached_values = extract_remove_memcached_db_containers(renamed_containers, calls)
     
-    # Random or round robin choice
-    choice = input("Do you want random assignment of calls between instance IDs or round robin assignment?\n (Enter 0 for 'random' or 1 for 'round_robin'): ").strip().lower()
+    # # Random or round robin choice
+    # choice = input("Do you want random assignment of calls between instance IDs or round robin assignment?\n (Enter 0 for 'random' or 1 for 'round_robin'): ").strip().lower()
 
-    # Define topics for Kafka (includes DB containers)
-    topics = []
+    # # Define topics for Kafka (includes DB containers)
+    # topics = []
 
-    # Handle other containers
-    for container in renamed_containers:
-        containerKeys = renamed_containers[container]
-        mappedName = containerKeys['mappedName']
-        replicas = containerKeys['replicas']
-        topics.append({ "name": mappedName, "partitions": 1, "replication_factor": kafka_replicas })
+    # # Handle other containers
+    # for container in renamed_containers:
+    #     containerKeys = renamed_containers[container]
+    #     mappedName = containerKeys['mappedName']
+    #     replicas = containerKeys['replicas']
+    #     topics.append({ "name": mappedName, "partitions": 1, "replication_factor": kafka_replicas })
 
-        pvc_name = f"{mappedName}-pvc"
-        job_name = f"{mappedName}-job"
-        data = split_calls_to_replicas(calls.get(mappedName, {}), replicas, mappedName, choice)
-        data_str = json.dumps(data).replace('"', '\\"')
+    #     pvc_name = f"{mappedName}-pvc"
+    #     job_name = f"{mappedName}-job"
+    #     data = split_calls_to_replicas(calls.get(mappedName, {}), replicas, mappedName, choice)
+    #     data_str = json.dumps(data).replace('"', '\\"')
 
-        # Create PVC and Jobs for other containers
-        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, data_str=data_str)
-        create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
-
-    # Handle DB containers differently
-    for service_name, container_keys in memcached_values.items():
-        memcached_mappedName = container_keys['mappedName']
-        replicas = container_keys.get('replicas', 1)
-
-        # Step 1: Create headless service for PostgreSQL container (for replication)
-        create_memcached_service(v1, NAMESPACE, memcached_mappedName)
-        create_container_service(v1, NAMESPACE, memcached_mappedName, [{ "port": 6379, "target_port": 6379, 'name': 'redis-port' }])
-
-        # # Step 2: Create PostgreSQL StatefulSet with replication support
-        pvc_name = f"{memcached_mappedName}-pvc"
-        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
-        create_redis_statefulset(apps_v1, NAMESPACE, memcached_mappedName, pvc_name, replicas=replicas)
+    #     # Create PVC and Jobs for other containers
+    #     create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, data_str=data_str)
+    #     create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
 
     # # Handle DB containers differently
-    for service_name, container_keys in db_values.items():
-        db_mappedName = container_keys['mappedName']
-        replicas = container_keys.get('replicas', 1)
+    # for service_name, container_keys in memcached_values.items():
+    #     memcached_mappedName = container_keys['mappedName']
+    #     replicas = container_keys.get('replicas', 1)
 
-        # Step 1: Create headless service for PostgreSQL container (for replication)
-        create_db_headless_service(v1, NAMESPACE, db_mappedName)
-        create_container_service(v1, NAMESPACE, db_mappedName, [{ "port": 5432, "target_port": 5432, 'name': 'postgresql' }])
+    #     # Step 1: Create headless service for PostgreSQL container (for replication)
+    #     create_memcached_service(v1, NAMESPACE, memcached_mappedName)
+    #     create_container_service(v1, NAMESPACE, memcached_mappedName, [{ "port": 6379, "target_port": 6379, 'name': 'redis-port' }])
 
-        # Step 2: Create PostgreSQL StatefulSet with replication support
-        pvc_name = f"{db_mappedName}-pvc"
-        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
-        create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
-    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
-    delete_all_configmaps(v1, NAMESPACE)
-    delete_completed_jobs(batch_v1, v1, NAMESPACE)
-    wait_for_pods_ready(NAMESPACE)
+    #     # # Step 2: Create PostgreSQL StatefulSet with replication support
+    #     pvc_name = f"{memcached_mappedName}-pvc"
+    #     create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
+    #     create_redis_statefulset(apps_v1, NAMESPACE, memcached_mappedName, pvc_name, replicas=replicas)
 
-    for service_name, container_keys in memcached_values.items():
-        db_mappedName = container_keys['mappedName']
-        create_redis_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
+    # # # Handle DB containers differently
+    # for service_name, container_keys in db_values.items():
+    #     db_mappedName = container_keys['mappedName']
+    #     replicas = container_keys.get('replicas', 1)
 
-    for service_name, container_keys in db_values.items():
-        db_mappedName = container_keys['mappedName']
-        create_postgres_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
-    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
-    delete_all_configmaps(v1, NAMESPACE)
-    delete_completed_jobs(batch_v1, v1, NAMESPACE)
+    #     # Step 1: Create headless service for PostgreSQL container (for replication)
+    #     create_db_headless_service(v1, NAMESPACE, db_mappedName)
+    #     create_container_service(v1, NAMESPACE, db_mappedName, [{ "port": 5432, "target_port": 5432, 'name': 'postgresql' }])
+
+    #     # Step 2: Create PostgreSQL StatefulSet with replication support
+    #     pvc_name = f"{db_mappedName}-pvc"
+    #     create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
+    #     create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
+    # wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
+    # delete_all_configmaps(v1, NAMESPACE)
+    # delete_completed_jobs(batch_v1, v1, NAMESPACE)
+    # wait_for_pods_ready(NAMESPACE)
+
+    # for service_name, container_keys in memcached_values.items():
+    #     db_mappedName = container_keys['mappedName']
+    #     create_redis_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
+
+    # for service_name, container_keys in db_values.items():
+    #     db_mappedName = container_keys['mappedName']
+    #     create_postgres_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
+    # wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
+    # delete_all_configmaps(v1, NAMESPACE)
+    # delete_completed_jobs(batch_v1, v1, NAMESPACE)
     
-    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT, NODE_IP)
+    # create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT, NODE_IP)
 
-    # Assign container jobs
-    renamed_containers = addContainerJob(renamed_containers)
+    # # Assign container jobs
+    # renamed_containers = addContainerJob(renamed_containers)
 
-    # Handle non-DB containers
-    for container_name in renamed_containers:
-        containerKeys = renamed_containers[container_name]
-        mappedName = containerKeys['mappedName']
-        containerJob = containerKeys['containerJob']
-        replicas = containerKeys['replicas']
+    # # Handle non-DB containers
+    # for container_name in renamed_containers:
+    #     containerKeys = renamed_containers[container_name]
+    #     mappedName = containerKeys['mappedName']
+    #     containerJob = containerKeys['containerJob']
+    #     replicas = containerKeys['replicas']
 
-        # Create services for each container
-        create_container_service(v1, NAMESPACE, mappedName, [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
+    #     # Create services for each container
+    #     create_container_service(v1, NAMESPACE, mappedName, [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
 
-        pvc_name = f"{mappedName}-pvc"
-        # Use apps_v1 for creating StatefulSets
-        create_container_statefulset(apps_v1, NAMESPACE, mappedName, pvc_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
+    #     pvc_name = f"{mappedName}-pvc"
+    #     # Use apps_v1 for creating StatefulSets
+    #     create_container_statefulset(apps_v1, NAMESPACE, mappedName, pvc_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
 
 
-    # Wait for all StatefulSets to be ready (including DB StatefulSets)
-    wait_for_pods_ready(NAMESPACE)
+    # # Wait for all StatefulSets to be ready (including DB StatefulSets)
+    # wait_for_pods_ready(NAMESPACE)
 
-    print("All statefulsets, deployments, and services are up in Kubernetes.")
-    port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
+    # print("All statefulsets, deployments, and services are up in Kubernetes.")
+    # port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
 
 
 if __name__ == "__main__":

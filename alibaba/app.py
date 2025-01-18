@@ -117,6 +117,16 @@ def v2022():
     service_replicas = {}
 
     for _, row in df.iterrows():
+        # Ignore rows with error values such as UNKNOWN
+        if (
+            row['um'] == 'UNKNOWN' or
+            row['dm'] == 'UNKNOWN' or
+            row['rpctype'] == 'UNKNOWN' or 
+            row['uminstanceid'] == 'UNKNOWN' or
+            row['dminstanceid'] == 'UNKNOWN'
+        ):
+            continue
+
         timestamp = row['timestamp']
         um = row['um']
         dm = row['dm']
@@ -165,6 +175,7 @@ def v2022():
         "calls": result,
         "containers": containers_json
     })
+
 
 @app.route('/probabilities', methods=['GET', 'POST'])
 def probabilities():
