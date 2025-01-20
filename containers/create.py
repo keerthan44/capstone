@@ -1520,109 +1520,109 @@ def main():
 
     renamed_containers, calls = get_and_rename_containers(containersFile="containers.json", callsFile=calls_file)
 
-    # # Deploy Redis and get redis_ip
-    # deploy_redis_environment(NAMESPACE, v1, apps_v1)
-    # redis_service_name = 'redis-service'
-    # wait_for_pods_ready(NAMESPACE)
+    # Deploy Redis and get redis_ip
+    deploy_redis_environment(NAMESPACE, v1, apps_v1)
+    redis_service_name = 'redis-service'
+    wait_for_pods_ready(NAMESPACE)
 
-    # # Call logging service setup (after Redis is ready)
-    # print(redis_service_name)
-    # create_logging_statefulset(apps_v1, NAMESPACE, redis_service_name, STORAGE_CLASS)
-    # create_logging_service(v1, NAMESPACE)
+    # Call logging service setup (after Redis is ready)
+    print(redis_service_name)
+    create_logging_statefulset(apps_v1, NAMESPACE, redis_service_name, STORAGE_CLASS)
+    create_logging_service(v1, NAMESPACE)
 
-    # # Get containers and calls data
-    # db_values, memcached_values = extract_remove_memcached_db_containers(renamed_containers, calls)
+    # Get containers and calls data
+    db_values, memcached_values = extract_remove_memcached_db_containers(renamed_containers, calls)
     
-    # # Random or round robin choice
-    # choice = input("Do you want random assignment of calls between instance IDs or round robin assignment?\n (Enter 0 for 'random' or 1 for 'round_robin'): ").strip().lower()
+    # Random or round robin choice
+    choice = input("Do you want random assignment of calls between instance IDs or round robin assignment?\n (Enter 0 for 'random' or 1 for 'round_robin'): ").strip().lower()
 
-    # # Define topics for Kafka (includes DB containers)
-    # topics = []
+    # Define topics for Kafka (includes DB containers)
+    topics = []
 
-    # # Handle other containers
-    # for container in renamed_containers:
-    #     containerKeys = renamed_containers[container]
-    #     mappedName = containerKeys['mappedName']
-    #     replicas = containerKeys['replicas']
-    #     topics.append({ "name": mappedName, "partitions": 1, "replication_factor": kafka_replicas })
+    # Handle other containers
+    for container in renamed_containers:
+        containerKeys = renamed_containers[container]
+        mappedName = containerKeys['mappedName']
+        replicas = containerKeys['replicas']
+        topics.append({ "name": mappedName, "partitions": 1, "replication_factor": kafka_replicas })
 
-    #     pvc_name = f"{mappedName}-pvc"
-    #     job_name = f"{mappedName}-job"
-    #     data = split_calls_to_replicas(calls.get(mappedName, {}), replicas, mappedName, choice)
-    #     data_str = json.dumps(data).replace('"', '\\"')
+        pvc_name = f"{mappedName}-pvc"
+        job_name = f"{mappedName}-job"
+        data = split_calls_to_replicas(calls.get(mappedName, {}), replicas, mappedName, choice)
+        data_str = json.dumps(data).replace('"', '\\"')
 
-    #     # Create PVC and Jobs for other containers
-    #     create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, data_str=data_str)
-    #     create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
+        # Create PVC and Jobs for other containers
+        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, data_str=data_str)
+        create_jobs_with_data(batch_v1, NAMESPACE, job_name, pvc_name, data_str)
+
+    # Handle DB containers differently
+    for service_name, container_keys in memcached_values.items():
+        memcached_mappedName = container_keys['mappedName']
+        replicas = container_keys.get('replicas', 1)
+
+        # Step 1: Create headless service for PostgreSQL container (for replication)
+        create_memcached_service(v1, NAMESPACE, memcached_mappedName)
+        create_container_service(v1, NAMESPACE, memcached_mappedName, [{ "port": 6379, "target_port": 6379, 'name': 'redis-port' }])
+
+        # # Step 2: Create PostgreSQL StatefulSet with replication support
+        pvc_name = f"{memcached_mappedName}-pvc"
+        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
+        create_redis_statefulset(apps_v1, NAMESPACE, memcached_mappedName, pvc_name, replicas=replicas)
 
     # # Handle DB containers differently
-    # for service_name, container_keys in memcached_values.items():
-    #     memcached_mappedName = container_keys['mappedName']
-    #     replicas = container_keys.get('replicas', 1)
+    for service_name, container_keys in db_values.items():
+        db_mappedName = container_keys['mappedName']
+        replicas = container_keys.get('replicas', 1)
 
-    #     # Step 1: Create headless service for PostgreSQL container (for replication)
-    #     create_memcached_service(v1, NAMESPACE, memcached_mappedName)
-    #     create_container_service(v1, NAMESPACE, memcached_mappedName, [{ "port": 6379, "target_port": 6379, 'name': 'redis-port' }])
+        # Step 1: Create headless service for PostgreSQL container (for replication)
+        create_db_headless_service(v1, NAMESPACE, db_mappedName)
+        create_container_service(v1, NAMESPACE, db_mappedName, [{ "port": 5432, "target_port": 5432, 'name': 'postgresql' }])
 
-    #     # # Step 2: Create PostgreSQL StatefulSet with replication support
-    #     pvc_name = f"{memcached_mappedName}-pvc"
-    #     create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
-    #     create_redis_statefulset(apps_v1, NAMESPACE, memcached_mappedName, pvc_name, replicas=replicas)
+        # Step 2: Create PostgreSQL StatefulSet with replication support
+        pvc_name = f"{db_mappedName}-pvc"
+        create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
+        create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
+    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
+    delete_all_configmaps(v1, NAMESPACE)
+    delete_completed_jobs(batch_v1, v1, NAMESPACE)
+    wait_for_pods_ready(NAMESPACE)
 
-    # # # Handle DB containers differently
-    # for service_name, container_keys in db_values.items():
-    #     db_mappedName = container_keys['mappedName']
-    #     replicas = container_keys.get('replicas', 1)
+    for service_name, container_keys in memcached_values.items():
+        db_mappedName = container_keys['mappedName']
+        create_redis_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
 
-    #     # Step 1: Create headless service for PostgreSQL container (for replication)
-    #     create_db_headless_service(v1, NAMESPACE, db_mappedName)
-    #     create_container_service(v1, NAMESPACE, db_mappedName, [{ "port": 5432, "target_port": 5432, 'name': 'postgresql' }])
-
-    #     # Step 2: Create PostgreSQL StatefulSet with replication support
-    #     pvc_name = f"{db_mappedName}-pvc"
-    #     create_pvc(v1, NAMESPACE, pvc_name, STORAGE_CLASS, access_mode=["ReadWriteOnce"])
-    #     create_postgres_statefulset(apps_v1, NAMESPACE, db_mappedName, pvc_name, replicas=replicas)
-    # wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
-    # delete_all_configmaps(v1, NAMESPACE)
-    # delete_completed_jobs(batch_v1, v1, NAMESPACE)
-    # wait_for_pods_ready(NAMESPACE)
-
-    # for service_name, container_keys in memcached_values.items():
-    #     db_mappedName = container_keys['mappedName']
-    #     create_redis_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
-
-    # for service_name, container_keys in db_values.items():
-    #     db_mappedName = container_keys['mappedName']
-    #     create_postgres_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
-    # wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
-    # delete_all_configmaps(v1, NAMESPACE)
-    # delete_completed_jobs(batch_v1, v1, NAMESPACE)
+    for service_name, container_keys in db_values.items():
+        db_mappedName = container_keys['mappedName']
+        create_postgres_insert_job(batch_v1, NAMESPACE, f"{db_mappedName}-insert-job", db_mappedName)
+    wait_for_all_jobs_to_complete(batch_v1, NAMESPACE)
+    delete_all_configmaps(v1, NAMESPACE)
+    delete_completed_jobs(batch_v1, v1, NAMESPACE)
     
-    # create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT, NODE_IP)
+    create_topics_http_request(topics, NAMESPACE, kafka_statefulset_name, kakfa_gateway_service_name, kafka_headless_service_name, KAFKA_EXTERNAL_GATEWAY_NODEPORT, NODE_IP)
 
-    # # Assign container jobs
-    # renamed_containers = addContainerJob(renamed_containers)
+    # Assign container jobs
+    renamed_containers = addContainerJob(renamed_containers)
 
-    # # Handle non-DB containers
-    # for container_name in renamed_containers:
-    #     containerKeys = renamed_containers[container_name]
-    #     mappedName = containerKeys['mappedName']
-    #     containerJob = containerKeys['containerJob']
-    #     replicas = containerKeys['replicas']
+    # Handle non-DB containers
+    for container_name in renamed_containers:
+        containerKeys = renamed_containers[container_name]
+        mappedName = containerKeys['mappedName']
+        containerJob = containerKeys['containerJob']
+        replicas = containerKeys['replicas']
 
-    #     # Create services for each container
-    #     create_container_service(v1, NAMESPACE, mappedName, [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
+        # Create services for each container
+        create_container_service(v1, NAMESPACE, mappedName, [{ "port": 80, "target_port": 80, 'name': 'flask-service' }, { "port": 50051, "target_port": 50051, "name": 'grpc-service' }])
 
-    #     pvc_name = f"{mappedName}-pvc"
-    #     # Use apps_v1 for creating StatefulSets
-    #     create_container_statefulset(apps_v1, NAMESPACE, mappedName, pvc_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
+        pvc_name = f"{mappedName}-pvc"
+        # Use apps_v1 for creating StatefulSets
+        create_container_statefulset(apps_v1, NAMESPACE, mappedName, pvc_name, kafka_replicas, redis_ip=redis_service_name, container_job=containerJob, replicas=replicas)
 
 
-    # # Wait for all StatefulSets to be ready (including DB StatefulSets)
-    # wait_for_pods_ready(NAMESPACE)
+    # Wait for all StatefulSets to be ready (including DB StatefulSets)
+    wait_for_pods_ready(NAMESPACE)
 
-    # print("All statefulsets, deployments, and services are up in Kubernetes.")
-    # port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
+    print("All statefulsets, deployments, and services are up in Kubernetes.")
+    port_forward_and_exec_func(NAMESPACE, redis_service_name, 60892, 6379, funcToExec=set_start_time_redis)
 
 
 if __name__ == "__main__":
