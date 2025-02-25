@@ -1246,8 +1246,8 @@ def main():
                         
                         logs_filename = f"{service_num}_{model_type}_{assignment_type}_{background_task_config}_{server_stress_config}_take{iteration}.csv"
                         
-                        if(logs_filename == "32_0_0_0_7_take2.csv"):
-                        # if(True):
+                        # if(logs_filename == "32_0_0_0_7_take2.csv"):
+                        if(True):
                             start_processing = True
                         
                         if not start_processing:
