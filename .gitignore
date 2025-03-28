@@ -2,6 +2,12 @@ dummy
 /containers/calls*.json
 /containers/containers*.json
 /containers/containers*.txt
+/containers/probabilities*.json
+/containers/new_calls*.json
+/containers/intermediate_probabilities*.json
+/containers/generated_timestamps_zipfian*.json
+/containers/generated_timestamps_exponential*.json
+
 **/.env
 *env*
 !**/.sample.env
